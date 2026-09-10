@@ -1,0 +1,50 @@
+version: '3.9'
+
+services:
+  frontend:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./apps/frontend:/app
+      - /app/node_modules
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    environment:
+      VITE_API_BASE_URL: http://backend:8787
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ./apps/worker
+      dockerfile: Dockerfile
+    ports:
+      - "8787:8787"
+    volumes:
+      - ./apps/worker:/app
+      - ./db:/app/db
+      - /app/node_modules
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    environment:
+      PORT: 8787
+      DATABASE_PATH: /app/db/tickets.db
+      MAILPIT_HOST: mailpit
+      MAILPIT_PORT: 1025
+      FRONTEND_URL: http://localhost:5173
+      JWT_SECRET: dev-secret
+    depends_on:
+      - mailpit
+
+  mailpit:
+    image: axllent/mailpit:v1.14
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  sqlite:
+    image: nouchka/sqlite3:latest
+    volumes:
+      - ./db:/data
+    command: ["sh", "-lc", "echo 'SQLite volume ready' && tail -f /dev/null"]

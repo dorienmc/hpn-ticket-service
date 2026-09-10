@@ -1,0 +1,10 @@
+{
+  "name": "hpn-ticket-service",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "docker compose up",
+    "down": "docker compose down",
+    "test": "npm --prefix apps/worker test"
+  }
+}
