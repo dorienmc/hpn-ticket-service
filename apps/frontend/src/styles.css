@@ -20,7 +20,7 @@ body {
 }
 
 .page {
-  width: min(100%, 540px);
+  width: min(100%, 640px);
   padding: 24px;
 }
 
@@ -64,7 +64,11 @@ input {
   font: inherit;
 }
 
-button {
+button,
+.primary-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   border-radius: 10px;
   background: #111827;
@@ -72,6 +76,7 @@ button {
   padding: 12px 18px;
   font: inherit;
   cursor: pointer;
+  text-decoration: none;
 }
 
 .status {
@@ -79,4 +84,88 @@ button {
   min-height: 24px;
   font-size: 0.95rem;
   color: #374151;
+}
+
+.reservation-content {
+  display: grid;
+  gap: 20px;
+}
+
+.status-header {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.badge {
+  display: inline-flex;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.badge.success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.badge.info {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.badge.warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.badge.muted {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.detail-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.detail-list > div {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.detail-list dt {
+  font-weight: 700;
+  color: #374151;
+}
+
+.detail-list dd {
+  margin: 0;
+  color: #111827;
+}
+
+.payment-box {
+  padding: 18px;
+  border-radius: 12px;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+}
+
+.success-box {
+  background: #ecfdf5;
+  border-color: #bbf7d0;
+}
+
+.muted-box {
+  background: #f9fafb;
+  border-color: #e5e7eb;
+}
+
+.error-message {
+  color: #b91c1c;
+  font-weight: 600;
 }

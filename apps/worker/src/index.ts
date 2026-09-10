@@ -59,6 +59,10 @@ app.get('/api/reservations/:orderNumber/:token', (req: Request, res: Response) =
   const now = new Date();
   const expiresAt = new Date(reservation.expires_at);
 
+  if (reservation.status === 'RESERVED' && now > expiresAt) {
+    reservation.status = 'EXPIRED';
+  }
+
   res.json({
     orderNumber: reservation.order_number,
     name: reservation.name,
