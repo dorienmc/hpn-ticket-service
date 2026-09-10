@@ -1,6 +1,6 @@
 import cors from 'cors';
 import express, { type Request, type Response } from 'express';
-import { expireReservations, createReservation, findReservationByToken, getAvailableCapacity, getReservationStatusSummary, markOrderPaid } from './services.js';
+import { expireReservations, createReservation, findReservationByToken, getAvailableCapacity, getReservationStatusSummary, listOrders, markOrderPaid } from './services.js';
 import { sendReservationEmail } from './email.js';
 
 const app = express();
@@ -95,6 +95,11 @@ app.post('/api/admin/orders/:orderNumber/pay', (req: Request, res: Response) => 
 app.get('/api/admin/summary', (_req: Request, res: Response) => {
   expireReservations();
   res.json(getReservationStatusSummary());
+});
+
+app.get('/api/admin/orders', (_req: Request, res: Response) => {
+  expireReservations();
+  res.json({ orders: listOrders() });
 });
 
 app.listen(port, '0.0.0.0', () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createReservation, getAvailableCapacity, expireReservations, findReservationByToken } from './services.js';
+import { createReservation, getAvailableCapacity, expireReservations, findReservationByToken, listOrders, markOrderPaid, getReservationStatusSummary } from './services.js';
 import { getDb } from './db.js';
 
 beforeEach(() => {
@@ -45,5 +45,19 @@ describe('reservation flow', () => {
 
     expect(expired).toBe(1);
     expect(findReservationByToken('oldtoken1234567890')?.status).toBe('EXPIRED');
+  });
+
+  it('lists orders and marks them paid', () => {
+    const reservation = createReservation({ name: 'Bob', email: 'bob@example.com', quantity: 3 });
+    const orders = listOrders();
+
+    expect(orders).toHaveLength(1);
+    expect(orders[0].order_number).toBe(reservation.order_number);
+
+    const updated = markOrderPaid(reservation.order_number);
+    expect(updated?.status).toBe('PAID');
+
+    const summary = getReservationStatusSummary();
+    expect(summary.paid).toBe(1);
   });
 });

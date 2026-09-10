@@ -86,6 +86,59 @@ button,
   color: #374151;
 }
 
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.summary-tile {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.summary-tile span {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.summary-tile strong {
+  font-size: 1.4rem;
+}
+
+.admin-list {
+  overflow-x: auto;
+}
+
+.orders-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.orders-table th,
+.orders-table td {
+  padding: 12px 10px;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+  vertical-align: middle;
+}
+
+.admin-button {
+  border: none;
+  border-radius: 8px;
+  background: #111827;
+  color: white;
+  padding: 8px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
 .reservation-content {
   display: grid;
   gap: 20px;

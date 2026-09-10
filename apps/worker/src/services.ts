@@ -113,6 +113,14 @@ export function expireReservations(): number {
   return result.changes;
 }
 
+export function listOrders(): ReservationRecord[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT * FROM orders
+    ORDER BY created_at DESC
+  `).all() as ReservationRecord[];
+}
+
 export function getReservationStatusSummary() {
   const db = getDb();
   const rows = db.prepare(`
