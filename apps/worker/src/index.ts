@@ -1,6 +1,6 @@
 import cors from 'cors';
 import express, { type Request, type Response } from 'express';
-import { expireReservations, createReservation, findReservationByToken, getAvailableCapacity, getReservationStatusSummary, listOrders, markOrderPaid } from './services.js';
+import { cancelReservation, createReservation, expireReservations, extendReservation, findReservationByToken, getAvailableCapacity, getReservationStatusSummary, listOrders, markOrderPaid } from './services.js';
 import { sendReservationEmail } from './email.js';
 
 const app = express();
@@ -90,6 +90,57 @@ app.post('/api/admin/orders/:orderNumber/pay', (req: Request, res: Response) => 
     status: updatedReservation.status,
     paidAt: updatedReservation.paid_at,
   });
+});
+
+app.post('/api/admin/orders/:orderNumber/cancel', (req: Request, res: Response) => {
+  const updatedReservation = cancelReservation(req.params.orderNumber);
+
+  if (!updatedReservation) {
+    res.status(400).json({ error: 'Only active reserved orders can be cancelled' });
+    return;
+  }
+
+  res.json({
+    orderNumber: updatedReservation.order_number,
+    status: updatedReservation.status,
+  });
+});
+
+app.post('/api/admin/orders/:orderNumber/extend', (req: Request, res: Response) => {
+  const hours = Number(req.body?.hours ?? 24);
+  const updatedReservation = extendReservation(req.params.orderNumber, hours);
+
+  if (!updatedReservation) {
+    res.status(400).json({ error: 'Only active reserved orders can be extended with a positive whole number of hours' });
+    return;
+  }
+
+  res.json({
+    orderNumber: updatedReservation.order_number,
+    status: updatedReservation.status,
+    expiresAt: updatedReservation.expires_at,
+  });
+});
+
+app.post('/api/admin/orders/:orderNumber/resend', async (req: Request, res: Response) => {
+  const reservation = listOrders().find((order) => order.order_number === req.params.orderNumber);
+
+  if (!reservation) {
+    res.status(404).json({ error: 'Order not found' });
+    return;
+  }
+
+  const paymentUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/payment/${reservation.order_number}/${reservation.access_token}`;
+  await sendReservationEmail({
+    to: reservation.email,
+    customerName: reservation.name,
+    orderNumber: reservation.order_number,
+    quantity: reservation.quantity,
+    amountCents: reservation.amount_cents,
+    paymentUrl,
+  });
+
+  res.json({ orderNumber: reservation.order_number, email: reservation.email });
 });
 
 app.get('/api/admin/summary', (_req: Request, res: Response) => {

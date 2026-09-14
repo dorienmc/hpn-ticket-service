@@ -72,8 +72,15 @@ async function initApp() {
                     <td>€${(order.amount_cents / 100).toFixed(2)}</td>
                     <td>
                       ${order.status === 'RESERVED'
-                        ? `<button class="admin-button" data-order="${order.order_number}">Mark paid</button>`
-                        : '<span>—</span>'}
+                        ? `<div class="admin-actions">
+                            <button class="admin-button" data-action="pay" data-order="${order.order_number}">Mark paid</button>
+                            <button class="admin-button secondary" data-action="extend" data-order="${order.order_number}">Extend 24h</button>
+                            <button class="admin-button danger" data-action="cancel" data-order="${order.order_number}">Cancel</button>
+                            <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}">Resend email</button>
+                          </div>`
+                        : `<div class="admin-actions">
+                            <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}">Resend email</button>
+                          </div>`}
                     </td>
                   </tr>
                 `).join('')}
@@ -81,23 +88,43 @@ async function initApp() {
             </table>
           `;
 
-          const buttons = listContainer.querySelectorAll<HTMLButtonElement>('[data-order]');
+          const buttons = listContainer.querySelectorAll<HTMLButtonElement>('[data-action][data-order]');
           buttons.forEach((button) => {
             button.addEventListener('click', async () => {
               const orderNumber = button.dataset.order;
-              if (!orderNumber) return;
+              const action = button.dataset.action;
+              if (!orderNumber || !action) return;
 
-              const response = await fetch(`${baseUrl}/api/admin/orders/${encodeURIComponent(orderNumber)}/pay`, {
-                method: 'POST'
-              });
-              const payload = await response.json();
+              const confirmation = action === 'cancel'
+                ? `Cancel reservation ${orderNumber}? This releases its tickets.`
+                : undefined;
 
-              if (!response.ok) {
-                alert(payload.error || 'Could not mark as paid');
+              if (confirmation && !window.confirm(confirmation)) {
                 return;
               }
 
-              alert(`Order ${payload.orderNumber} marked as paid.`);
+              button.disabled = true;
+              const response = await fetch(`${baseUrl}/api/admin/orders/${encodeURIComponent(orderNumber)}/${action}`, {
+                method: 'POST',
+                headers: action === 'extend' ? { 'Content-Type': 'application/json' } : undefined,
+                body: action === 'extend' ? JSON.stringify({ hours: 24 }) : undefined,
+              });
+              const payload = await response.json();
+              button.disabled = false;
+
+              if (!response.ok) {
+                alert(payload.error || `Could not ${action} this order`);
+                return;
+              }
+
+              const message = action === 'pay'
+                ? `Order ${payload.orderNumber} marked as paid.`
+                : action === 'extend'
+                  ? `Order ${payload.orderNumber} extended by 24 hours.`
+                  : action === 'cancel'
+                    ? `Order ${payload.orderNumber} cancelled.`
+                    : `Reservation email resent to ${payload.email}.`;
+              alert(message);
               window.location.reload();
             });
           });

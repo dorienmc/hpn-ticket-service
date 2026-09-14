@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createReservation, getAvailableCapacity, expireReservations, findReservationByToken, listOrders, markOrderPaid, getReservationStatusSummary } from './services.js';
+import { cancelReservation, createReservation, extendReservation, getAvailableCapacity, expireReservations, findReservationByToken, listOrders, markOrderPaid, getReservationStatusSummary } from './services.js';
 import { getDb } from './db.js';
 
 beforeEach(() => {
@@ -59,5 +59,25 @@ describe('reservation flow', () => {
 
     const summary = getReservationStatusSummary();
     expect(summary.paid).toBe(1);
+  });
+
+  it('cancels a reserved order and releases its capacity', () => {
+    const reservation = createReservation({ name: 'Carla', email: 'carla@example.com', quantity: 4 });
+
+    const cancelled = cancelReservation(reservation.order_number);
+
+    expect(cancelled?.status).toBe('CANCELLED');
+    expect(getAvailableCapacity()).toBe(100);
+    expect(cancelReservation(reservation.order_number)).toBeNull();
+  });
+
+  it('extends an active reservation from the current expiry time', () => {
+    const reservation = createReservation({ name: 'Dev', email: 'dev@example.com', quantity: 1 });
+
+    const extended = extendReservation(reservation.order_number, 24);
+
+    expect(extended?.status).toBe('RESERVED');
+    expect(new Date(extended!.expires_at).getTime()).toBeGreaterThan(new Date(reservation.expires_at).getTime());
+    expect(extendReservation('missing-order', 24)).toBeNull();
   });
 });

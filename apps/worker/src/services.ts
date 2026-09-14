@@ -101,6 +101,45 @@ export function markOrderPaid(orderNumber: string): ReservationRecord | null {
   return findReservationByOrderNumber(orderNumber);
 }
 
+export function cancelReservation(orderNumber: string): ReservationRecord | null {
+  const db = getDb();
+  const reservation = findReservationByOrderNumber(orderNumber);
+
+  if (!reservation || reservation.status !== 'RESERVED') {
+    return null;
+  }
+
+  db.prepare(`
+    UPDATE orders
+    SET status = ?
+    WHERE order_number = ?
+  `).run('CANCELLED', orderNumber);
+
+  return findReservationByOrderNumber(orderNumber);
+}
+
+export function extendReservation(orderNumber: string, hours: number): ReservationRecord | null {
+  const db = getDb();
+  const reservation = findReservationByOrderNumber(orderNumber);
+
+  if (!reservation || reservation.status !== 'RESERVED' || !Number.isInteger(hours) || hours < 1) {
+    return null;
+  }
+
+  const currentExpiry = new Date(reservation.expires_at);
+  if (currentExpiry <= new Date()) {
+    return null;
+  }
+
+  db.prepare(`
+    UPDATE orders
+    SET expires_at = ?
+    WHERE order_number = ?
+  `).run(addHoursToIsoString(currentExpiry, hours), orderNumber);
+
+  return findReservationByOrderNumber(orderNumber);
+}
+
 export function expireReservations(): number {
   const db = getDb();
   const now = new Date().toISOString();

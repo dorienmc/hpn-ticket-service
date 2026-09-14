@@ -139,6 +139,26 @@ button,
   cursor: pointer;
 }
 
+.admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.admin-button.secondary {
+  background: #e5e7eb;
+  color: #111827;
+}
+
+.admin-button.danger {
+  background: #b91c1c;
+}
+
+.admin-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .reservation-content {
   display: grid;
   gap: 20px;
