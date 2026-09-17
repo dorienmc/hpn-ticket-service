@@ -112,6 +112,22 @@ button,
   font-size: 1.4rem;
 }
 
+.admin-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(160px, 1fr);
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+select {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  background: white;
+  font: inherit;
+}
+
 .admin-list {
   overflow-x: auto;
 }
@@ -241,4 +257,10 @@ button,
 .error-message {
   color: #b91c1c;
   font-weight: 600;
+}
+
+@media (max-width: 560px) {
+  .admin-filters {
+    grid-template-columns: 1fr;
+  }
 }

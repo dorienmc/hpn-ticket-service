@@ -35,11 +35,32 @@ test('admin can mark a reservation as paid', async ({ page, request }) => {
   const orderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
   await expect(orderRow).toBeVisible();
 
-  const dialogPromise = page.waitForEvent('dialog');
   await orderRow.getByRole('button', { name: 'Mark paid' }).click();
 
-  const dialog = await dialogPromise;
-  expect(dialog.message()).toBe(`Order ${reservation.orderNumber} marked as paid.`);
-  await dialog.accept();
+  await expect(page.getByText(`Order ${reservation.orderNumber} marked as paid.`)).toBeVisible();
   await expect(page.locator('tr').filter({ hasText: reservation.orderNumber })).toContainText('PAID');
+});
+
+test('admin can filter orders by search and status', async ({ page, request }) => {
+  const response = await request.post(`${process.env.E2E_API_URL || 'http://localhost:8787'}/api/reservations`, {
+    data: {
+      name: 'Filterable E2E Customer',
+      email: uniqueEmail(),
+      quantity: 1,
+    },
+  });
+
+  expect(response.ok()).toBeTruthy();
+  const reservation = await response.json();
+
+  await page.goto('/admin');
+  const orderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
+  await expect(orderRow).toBeVisible();
+
+  await page.getByLabel('Status').selectOption('PAID');
+  await expect(orderRow).not.toBeVisible();
+
+  await page.getByLabel('Status').selectOption('RESERVED');
+  await page.getByLabel('Search orders').fill('Filterable E2E Customer');
+  await expect(orderRow).toBeVisible();
 });

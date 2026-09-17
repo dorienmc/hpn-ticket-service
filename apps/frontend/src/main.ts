@@ -17,13 +17,31 @@ async function initApp() {
           <p class="eyebrow">Admin</p>
           <h1>Reservation overview</h1>
           <div id="admin-summary" class="summary-grid"></div>
+          <div class="admin-filters">
+            <label>
+              Search orders
+              <input id="order-search" type="search" placeholder="Order, name, or email" />
+            </label>
+            <label>
+              Status
+              <select id="status-filter">
+                <option value="ALL">All</option>
+                <option value="RESERVED">Reserved</option>
+                <option value="PAID">Paid</option>
+                <option value="EXPIRED">Expired</option>
+                <option value="CANCELLED">Cancelled</option>
+              </select>
+            </label>
+          </div>
           <div id="admin-list" class="admin-list"></div>
+          <p id="admin-status" class="status" aria-live="polite"></p>
         </section>
       </main>
     `;
 
     const summaryContainer = document.querySelector('#admin-summary');
     const listContainer = document.querySelector('#admin-list');
+    const adminStatus = document.querySelector<HTMLParagraphElement>('#admin-status');
 
     try {
       const summaryResponse = await fetch(`${baseUrl}/api/admin/summary`);
@@ -45,9 +63,23 @@ async function initApp() {
       const orders = ordersData.orders ?? [];
 
       if (listContainer) {
-        if (!orders.length) {
-          listContainer.innerHTML = '<p>No reservations yet.</p>';
-        } else {
+        const searchInput = document.querySelector<HTMLInputElement>('#order-search');
+        const statusFilter = document.querySelector<HTMLSelectElement>('#status-filter');
+
+        const renderOrders = () => {
+          const searchTerm = searchInput?.value.trim().toLowerCase() ?? '';
+          const selectedStatus = statusFilter?.value ?? 'ALL';
+          const filteredOrders = orders.filter((order: any) => {
+            const searchable = `${order.order_number} ${order.name} ${order.email}`.toLowerCase();
+            return (!searchTerm || searchable.includes(searchTerm))
+              && (selectedStatus === 'ALL' || order.status === selectedStatus);
+          });
+
+          if (!filteredOrders.length) {
+            listContainer.innerHTML = '<p>No matching reservations.</p>';
+            return;
+          }
+
           listContainer.innerHTML = `
             <table class="orders-table">
               <thead>
@@ -62,7 +94,7 @@ async function initApp() {
                 </tr>
               </thead>
               <tbody>
-                ${orders.map((order: any) => `
+                ${filteredOrders.map((order: any) => `
                   <tr>
                     <td>${order.order_number}</td>
                     <td>${order.name}</td>
@@ -124,11 +156,20 @@ async function initApp() {
                   : action === 'cancel'
                     ? `Order ${payload.orderNumber} cancelled.`
                     : `Reservation email resent to ${payload.email}.`;
-              alert(message);
-              window.location.reload();
+                    const order = orders.find((candidate: any) => candidate.order_number === orderNumber);
+                    if (order && action === 'pay') order.status = 'PAID';
+                    if (order && action === 'cancel') order.status = 'CANCELLED';
+                    if (order && action === 'extend') order.expires_at = payload.expiresAt;
+                    if (adminStatus) adminStatus.textContent = message;
+                    renderOrders();
             });
           });
-        }
+
+        };
+
+        searchInput?.addEventListener('input', renderOrders);
+        statusFilter?.addEventListener('change', renderOrders);
+        renderOrders();
       }
     } catch (error) {
       if (listContainer) {
