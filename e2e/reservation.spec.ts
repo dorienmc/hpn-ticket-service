@@ -7,16 +7,16 @@ function uniqueEmail(): string {
 test('customer can create a reservation and view its private status page', async ({ page }) => {
   await page.goto('/');
 
-  await page.getByLabel('Full name').fill('E2E Customer');
-  await page.getByLabel('Email address').fill(uniqueEmail());
-  await page.getByLabel('Number of tickets').fill('2');
-  await page.getByRole('button', { name: 'Reserve tickets' }).click();
+  await page.getByLabel('Volledige naam').fill('E2E Customer');
+  await page.getByLabel('E-mailadres').fill(uniqueEmail());
+  await page.getByLabel('Aantal tickets').fill('2');
+  await page.getByRole('button', { name: 'Tickets reserveren' }).click();
 
   await expect(page).toHaveURL(/\/payment\/HP9-[^/]+\/[^/]+$/);
-  await expect(page.getByRole('heading', { name: 'Reservation status' })).toBeVisible();
-  await expect(page.getByText('Reserved', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Reserveringsstatus' })).toBeVisible();
+  await expect(page.getByText('Gereserveerd', { exact: true })).toBeVisible();
   await expect(page.getByText('E2E Customer', { exact: true })).toBeVisible();
-  await expect(page.getByText('Pay via ING', { exact: true })).toBeVisible();
+  await expect(page.getByText('Betalen via ING', { exact: true })).toBeVisible();
 });
 
 test('admin can mark a reservation as paid', async ({ page, request }) => {
@@ -35,20 +35,20 @@ test('admin can mark a reservation as paid', async ({ page, request }) => {
   const orderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
   await expect(orderRow).toBeVisible();
 
-  await orderRow.getByRole('button', { name: 'Mark paid' }).click();
+  await orderRow.getByRole('button', { name: 'Markeer als betaald' }).click();
 
-  await expect(page.getByText(`Order ${reservation.orderNumber} marked as paid.`)).toBeVisible();
-  await expect(page.locator('tr').filter({ hasText: reservation.orderNumber })).toContainText('PAID');
+  await expect(page.getByText(`Order ${reservation.orderNumber} is als betaald gemarkeerd.`)).toBeVisible();
+  await expect(page.locator('tr').filter({ hasText: reservation.orderNumber })).toContainText('Betaald');
 
   await page.goto(reservation.paymentUrl);
-  await expect(page.getByRole('heading', { name: 'Your tickets' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Je tickets' })).toBeVisible();
   await expect(page.locator('.ticket-list li')).toHaveCount(1);
 
   await page.goto('/admin');
   const paidOrderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
-  await expect(paidOrderRow.getByRole('button', { name: /HP9-TKT-.*Check in/ })).toBeVisible();
-  await paidOrderRow.getByRole('button', { name: /HP9-TKT-.*Check in/ }).click();
-  await expect(page.getByText(/Ticket HP9-TKT-.* checked in\./)).toBeVisible();
+  await expect(paidOrderRow.getByRole('button', { name: /HP9-TKT-.*Inchecken/ })).toBeVisible();
+  await paidOrderRow.getByRole('button', { name: /HP9-TKT-.*Inchecken/ }).click();
+  await expect(page.getByText(/Ticket HP9-TKT-.* is ingecheckt\./)).toBeVisible();
 });
 
 test('admin can filter orders by search and status', async ({ page, request }) => {
@@ -71,6 +71,6 @@ test('admin can filter orders by search and status', async ({ page, request }) =
   await expect(orderRow).not.toBeVisible();
 
   await page.getByLabel('Status').selectOption('RESERVED');
-  await page.getByLabel('Search orders').fill('Filterable E2E Customer');
+  await page.getByLabel('Reserveringen zoeken').fill('Filterable E2E Customer');
   await expect(orderRow).toBeVisible();
 });

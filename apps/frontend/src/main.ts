@@ -10,27 +10,38 @@ const baseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8787';
 const maxTickets = import.meta.env.VITE_MAX_TICKETS_PER_RESERVATION ?? '5';
 const path = window.location.pathname;
 
+function statusLabel(status: string): string {
+  return {
+    RESERVED: 'Gereserveerd',
+    PAID: 'Betaald',
+    EXPIRED: 'Verlopen',
+    CANCELLED: 'Geannuleerd',
+    VALID: 'Geldig',
+    USED: 'Gebruikt',
+  }[status] ?? status;
+}
+
 async function initApp() {
   if (path.startsWith('/admin')) {
     app.innerHTML = `
       <main class="page">
         <section class="card reservation-card">
-          <p class="eyebrow">Admin</p>
-          <h1>Reservation overview</h1>
+          <p class="eyebrow">Beheer</p>
+          <h1>Overzicht reserveringen</h1>
           <div id="admin-summary" class="summary-grid"></div>
           <div class="admin-filters">
             <label>
-              Search orders
-              <input id="order-search" type="search" placeholder="Order, name, or email" />
+              Reserveringen zoeken
+              <input id="order-search" type="search" placeholder="Ordernummer, naam of e-mail" />
             </label>
             <label>
               Status
               <select id="status-filter">
-                <option value="ALL">All</option>
-                <option value="RESERVED">Reserved</option>
-                <option value="PAID">Paid</option>
-                <option value="EXPIRED">Expired</option>
-                <option value="CANCELLED">Cancelled</option>
+                  <option value="ALL">Alle</option>
+                  <option value="RESERVED">Gereserveerd</option>
+                  <option value="PAID">Betaald</option>
+                  <option value="EXPIRED">Verlopen</option>
+                  <option value="CANCELLED">Geannuleerd</option>
               </select>
             </label>
           </div>
@@ -50,12 +61,12 @@ async function initApp() {
 
       if (summaryContainer) {
         summaryContainer.innerHTML = `
-          <div class="summary-tile"><span>Total capacity</span><strong>${summary.totalCapacity ?? 0}</strong></div>
-          <div class="summary-tile"><span>Reserved</span><strong>${summary.reserved ?? 0}</strong></div>
-          <div class="summary-tile"><span>Paid</span><strong>${summary.paid ?? 0}</strong></div>
-          <div class="summary-tile"><span>Available</span><strong>${summary.available ?? 0}</strong></div>
-          <div class="summary-tile"><span>Expired</span><strong>${summary.expired ?? 0}</strong></div>
-          <div class="summary-tile"><span>Cancelled</span><strong>${summary.cancelled ?? 0}</strong></div>
+          <div class="summary-tile"><span>Totale capaciteit</span><strong>${summary.totalCapacity ?? 0}</strong></div>
+          <div class="summary-tile"><span>Gereserveerd</span><strong>${summary.reserved ?? 0}</strong></div>
+          <div class="summary-tile"><span>Betaald</span><strong>${summary.paid ?? 0}</strong></div>
+          <div class="summary-tile"><span>Beschikbaar</span><strong>${summary.available ?? 0}</strong></div>
+          <div class="summary-tile"><span>Verlopen</span><strong>${summary.expired ?? 0}</strong></div>
+          <div class="summary-tile"><span>Geannuleerd</span><strong>${summary.cancelled ?? 0}</strong></div>
         `;
       }
 
@@ -77,7 +88,7 @@ async function initApp() {
           });
 
           if (!filteredOrders.length) {
-            listContainer.innerHTML = '<p>No matching reservations.</p>';
+            listContainer.innerHTML = '<p>Geen overeenkomende reserveringen.</p>';
             return;
           }
 
@@ -85,13 +96,13 @@ async function initApp() {
             <table class="orders-table">
               <thead>
                 <tr>
-                  <th>Order</th>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Qty</th>
+                  <th>Ordernummer</th>
+                  <th>Naam</th>
+                  <th>E-mail</th>
+                  <th>Aantal</th>
                   <th>Status</th>
-                  <th>Amount</th>
-                  <th>Action</th>
+                  <th>Bedrag</th>
+                  <th>Actie</th>
                 </tr>
               </thead>
               <tbody>
@@ -101,23 +112,23 @@ async function initApp() {
                     <td>${order.name}</td>
                     <td>${order.email}</td>
                     <td>${order.quantity}</td>
-                    <td>${order.status}</td>
+                    <td>${statusLabel(order.status)}</td>
                     <td>€${(order.amount_cents / 100).toFixed(2)}</td>
                     <td>
                       ${order.status === 'RESERVED'
                         ? `<div class="admin-actions">
-                            <button class="admin-button" data-action="pay" data-order="${order.order_number}">Mark paid</button>
-                            <button class="admin-button secondary" data-action="extend" data-order="${order.order_number}">Extend 24h</button>
-                            <button class="admin-button danger" data-action="cancel" data-order="${order.order_number}">Cancel</button>
-                            <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}">Resend email</button>
+                            <button class="admin-button" data-action="pay" data-order="${order.order_number}">Markeer als betaald</button>
+                            <button class="admin-button secondary" data-action="extend" data-order="${order.order_number}">Verleng 24 uur</button>
+                            <button class="admin-button danger" data-action="cancel" data-order="${order.order_number}">Annuleer</button>
+                            <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}">E-mail opnieuw sturen</button>
                           </div>`
                         : order.status === 'PAID'
                           ? `<div class="admin-actions">
-                              ${order.tickets?.map((ticket: { ticket_code: string; status: string }) => `<button class="admin-button ${ticket.status === 'USED' ? 'secondary' : ''}" data-action="checkin" data-ticket="${ticket.ticket_code}" data-order="${order.order_number}" ${ticket.status === 'USED' ? 'disabled' : ''}>${ticket.ticket_code}: ${ticket.status === 'USED' ? 'Used' : 'Check in'}</button>`).join('') ?? ''}
-                              <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}">Resend email</button>
+                              ${order.tickets?.map((ticket: { ticket_code: string; status: string }) => `<button class="admin-button ${ticket.status === 'USED' ? 'secondary' : ''}" data-action="checkin" data-ticket="${ticket.ticket_code}" data-order="${order.order_number}" ${ticket.status === 'USED' ? 'disabled' : ''}>${ticket.ticket_code}: ${ticket.status === 'USED' ? 'Gebruikt' : 'Inchecken'}</button>`).join('') ?? ''}
+                              <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}">E-mail opnieuw sturen</button>
                             </div>`
                         : `<div class="admin-actions">
-                            <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}">Resend email</button>
+                            <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}">E-mail opnieuw sturen</button>
                           </div>`}
                     </td>
                   </tr>
@@ -134,7 +145,7 @@ async function initApp() {
               if (!orderNumber || !action) return;
 
               const confirmation = action === 'cancel'
-                ? `Cancel reservation ${orderNumber}? This releases its tickets.`
+                ? `Reservering ${orderNumber} annuleren? De tickets komen dan weer beschikbaar.`
                 : undefined;
 
               if (confirmation && !window.confirm(confirmation)) {
@@ -155,19 +166,19 @@ async function initApp() {
               button.disabled = false;
 
               if (!response.ok) {
-                alert(payload.error || `Could not ${action} this order`);
+                alert(payload.error || `Actie voor deze reservering is mislukt`);
                 return;
               }
 
               const message = action === 'pay'
-                ? `Order ${payload.orderNumber} marked as paid.`
+                ? `Order ${payload.orderNumber} is als betaald gemarkeerd.`
                 : action === 'extend'
-                  ? `Order ${payload.orderNumber} extended by 24 hours.`
+                  ? `Order ${payload.orderNumber} is met 24 uur verlengd.`
                   : action === 'cancel'
-                    ? `Order ${payload.orderNumber} cancelled.`
+                    ? `Order ${payload.orderNumber} is geannuleerd.`
                     : action === 'checkin'
-                      ? `Ticket ${payload.ticketCode} checked in.`
-                      : `Reservation email resent to ${payload.email}.`;
+                      ? `Ticket ${payload.ticketCode} is ingecheckt.`
+                      : `De reserverings-e-mail is opnieuw verstuurd naar ${payload.email}.`;
                     const order = orders.find((candidate: any) => candidate.order_number === orderNumber);
                     if (order && action === 'pay') order.status = 'PAID';
                     if (order && action === 'cancel') order.status = 'CANCELLED';
@@ -189,7 +200,7 @@ async function initApp() {
       }
     } catch (error) {
       if (listContainer) {
-        listContainer.innerHTML = `<p class="error-message">${error instanceof Error ? error.message : 'Unable to load admin data.'}</p>`;
+        listContainer.innerHTML = `<p class="error-message">${error instanceof Error ? error.message : 'Beheergegevens konden niet worden geladen.'}</p>`;
       }
     }
 
@@ -205,8 +216,8 @@ async function initApp() {
       <main class="page">
         <section class="card reservation-card">
           <p class="eyebrow">Half Past Nine</p>
-          <h1>Reservation status</h1>
-          <div id="reservation-content" class="reservation-content">Loading...</div>
+          <h1>Reserveringsstatus</h1>
+          <div id="reservation-content" class="reservation-content">Laden...</div>
         </section>
       </main>
     `;
@@ -223,46 +234,46 @@ async function initApp() {
         }
 
         const amount = (payload.amountCents / 100).toFixed(2);
-        const expiresAt = new Date(payload.expiresAt).toLocaleString('en-GB', {
+        const expiresAt = new Date(payload.expiresAt).toLocaleString('nl-NL', {
           dateStyle: 'medium',
           timeStyle: 'short',
         });
 
         const statusMarkup = payload.status === 'PAID'
-          ? `<div class="badge success">Paid</div>`
+          ? `<div class="badge success">Betaald</div>`
           : payload.status === 'EXPIRED'
-            ? `<div class="badge warning">Expired</div>`
+            ? `<div class="badge warning">Verlopen</div>`
             : payload.status === 'CANCELLED'
-              ? `<div class="badge muted">Cancelled</div>`
-              : `<div class="badge info">Reserved</div>`;
+              ? `<div class="badge muted">Geannuleerd</div>`
+              : `<div class="badge info">Gereserveerd</div>`;
 
         const paymentSection = payload.status === 'RESERVED'
           ? `
             <div class="payment-box">
-              <p>Payment is still required for this reservation.</p>
+              <p>Voor deze reservering moet nog worden betaald.</p>
               <a class="primary-link" href="${payload.paymentLink}" target="_blank" rel="noreferrer">
-                Pay via ING
+                Betalen via ING
               </a>
             </div>
           `
           : payload.status === 'PAID'
             ? `
               <div class="payment-box success-box">
-                <p>Payment received and the reservation is marked as paid.</p>
+                <p>De betaling is ontvangen en de reservering is als betaald gemarkeerd.</p>
               </div>
             `
             : `
               <div class="payment-box muted-box">
-                <p>This reservation is no longer active.</p>
+                <p>Deze reservering is niet meer actief.</p>
               </div>
             `;
 
         const ticketSection = payload.status === 'PAID' && payload.tickets?.length
           ? `
             <div class="payment-box success-box">
-              <h2>Your tickets</h2>
+              <h2>Je tickets</h2>
               <ul class="ticket-list">
-                ${payload.tickets.map((ticket: { ticket_code: string; status: string }) => `<li><strong>${ticket.ticket_code}</strong><span>${ticket.status}</span></li>`).join('')}
+                ${payload.tickets.map((ticket: { ticket_code: string; status: string }) => `<li><strong>${ticket.ticket_code}</strong><span>${statusLabel(ticket.status)}</span></li>`).join('')}
               </ul>
             </div>
           `
@@ -273,19 +284,19 @@ async function initApp() {
             ${statusMarkup}
           </div>
           <dl class="detail-list">
-            <div><dt>Order number</dt><dd>${payload.orderNumber}</dd></div>
-            <div><dt>Name</dt><dd>${payload.name}</dd></div>
-            <div><dt>Email</dt><dd>${payload.email}</dd></div>
-            <div><dt>Tickets</dt><dd>${payload.quantity}</dd></div>
-            <div><dt>Amount</dt><dd>€${amount}</dd></div>
-            <div><dt>Expires</dt><dd>${expiresAt}</dd></div>
+            <div><dt>Ordernummer</dt><dd>${payload.orderNumber}</dd></div>
+              <div><dt>Naam</dt><dd>${payload.name}</dd></div>
+              <div><dt>E-mail</dt><dd>${payload.email}</dd></div>
+              <div><dt>Tickets</dt><dd>${payload.quantity}</dd></div>
+              <div><dt>Bedrag</dt><dd>€${amount}</dd></div>
+              <div><dt>Verloopt op</dt><dd>${expiresAt}</dd></div>
           </dl>
           ${paymentSection}
           ${ticketSection}
         `;
       } catch (error) {
         container.innerHTML = `
-          <p class="error-message">${error instanceof Error ? error.message : 'This reservation could not be found.'}</p>
+          <p class="error-message">${error instanceof Error ? error.message : 'Deze reservering kon niet worden gevonden.'}</p>
         `;
       }
     }
@@ -297,24 +308,24 @@ async function initApp() {
     <main class="page">
       <section class="card">
         <p class="eyebrow">Half Past Nine</p>
-        <h1>Reserve your tickets</h1>
+        <h1>Reserveer je tickets</h1>
         <form id="reservation-form" class="form">
           <label>
-            Full name
+            Volledige naam
             <input id="name" name="name" type="text" required />
           </label>
 
           <label>
-            Email address
+            E-mailadres
             <input id="email" name="email" type="email" required />
           </label>
 
           <label>
-            Number of tickets
+            Aantal tickets
             <input id="quantity" name="quantity" type="number" min="1" max="${maxTickets}" value="1" required />
           </label>
 
-          <button type="submit">Reserve tickets</button>
+          <button type="submit">Tickets reserveren</button>
         </form>
 
         <p id="status" class="status" aria-live="polite"></p>
@@ -334,11 +345,11 @@ async function initApp() {
     const quantity = Number(formData.get('quantity') ?? 1);
 
     if (!name || !email || quantity < 1) {
-      status!.textContent = 'Please fill in all required fields.';
+      status!.textContent = 'Vul alle verplichte velden in.';
       return;
     }
 
-    status!.textContent = 'Creating your reservation...';
+    status!.textContent = 'Je reservering wordt aangemaakt...';
 
     try {
       const response = await fetch(`${baseUrl}/api/reservations`, {
@@ -353,10 +364,10 @@ async function initApp() {
         throw new Error(payload.error || 'Reservation failed');
       }
 
-      status!.textContent = `Reservation created. Order ${payload.orderNumber}. View your reservation: ${payload.paymentUrl}`;
+      status!.textContent = `Reservering aangemaakt. Order ${payload.orderNumber}. Bekijk je reservering: ${payload.paymentUrl}`;
       window.location.href = payload.paymentUrl;
     } catch (error) {
-      status!.textContent = error instanceof Error ? error.message : 'Unknown error';
+      status!.textContent = error instanceof Error ? error.message : 'Er is een onbekende fout opgetreden.';
     }
   });
 }

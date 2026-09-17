@@ -30,21 +30,21 @@ export async function sendReservationEmail({
   await transporter.sendMail({
     from: 'noreply@halfpastnine.test',
     to,
-    subject: `Your Half Past Nine reservation (${orderNumber})`,
+    subject: `Je reservering voor Half Past Nine (${orderNumber})`,
     html: `
-      <h2>Thanks, ${customerName}!</h2>
-      <p>Your reservation for ${quantity} ticket(s) has been created.</p>
-      <p><strong>Order:</strong> ${orderNumber}</p>
-      <p><strong>Amount:</strong> €${amountEuros}</p>
-      <p><strong>Next step:</strong> complete payment at the private reservation page.</p>
-      <p><a href="${paymentUrl}">Open your reservation page</a></p>
+      <h2>Bedankt, ${customerName}!</h2>
+      <p>Je reservering voor ${quantity} ticket(s) is aangemaakt.</p>
+      <p><strong>Ordernummer:</strong> ${orderNumber}</p>
+      <p><strong>Bedrag:</strong> €${amountEuros}</p>
+      <p><strong>Volgende stap:</strong> betaal via de persoonlijke reserveringspagina.</p>
+      <p><a href="${paymentUrl}">Open je reserveringspagina</a></p>
     `,
     text: `
-      Thanks, ${customerName}!
-      Your reservation for ${quantity} ticket(s) has been created.
-      Order: ${orderNumber}
-      Amount: €${amountEuros}
-      Please open your reservation page:
+      Bedankt, ${customerName}!
+      Je reservering voor ${quantity} ticket(s) is aangemaakt.
+      Ordernummer: ${orderNumber}
+      Bedrag: €${amountEuros}
+      Open je reserveringspagina:
       ${paymentUrl}
     `,
   });
