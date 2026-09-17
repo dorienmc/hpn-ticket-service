@@ -1,10 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from './db.js';
+import { config } from './config.js';
 import type { ReservationInput, ReservationRecord, ReservationStatus, TicketRecord } from './types.js';
-
-const TOTAL_CAPACITY = 100;
-const TICKET_PRICE_CENTS = 1000;
-const RESERVATION_TTL_HOURS = 48;
 
 function generateOrderNumber(): string {
   const timestamp = Date.now().toString().slice(-8);
@@ -34,7 +31,7 @@ export function getAvailableCapacity(): number {
   `).get(new Date().toISOString()) as { active_quantity: number | null };
 
   const activeQuantity = result?.active_quantity ?? 0;
-  return TOTAL_CAPACITY - activeQuantity;
+  return config.totalCapacity - activeQuantity;
 }
 
 export function createReservation(input: ReservationInput): ReservationRecord {
@@ -47,8 +44,8 @@ export function createReservation(input: ReservationInput): ReservationRecord {
   }
 
   const now = new Date();
-  const expiresAt = addHoursToIsoString(now, RESERVATION_TTL_HOURS);
-  const amountCents = quantity * TICKET_PRICE_CENTS;
+  const expiresAt = addHoursToIsoString(now, config.reservationTtlHours);
+  const amountCents = quantity * config.ticketPriceCents;
   const orderNumber = generateOrderNumber();
   const accessToken = generateAccessToken();
 
@@ -221,6 +218,7 @@ export function getReservationStatusSummary() {
 
   const summary: Record<string, number> = {
     total: 0,
+    totalCapacity: config.totalCapacity,
     reserved: 0,
     paid: 0,
     available: getAvailableCapacity(),

@@ -22,6 +22,17 @@ This starts:
 
 The backend uses a SQLite database stored in the repository-backed volume so the data persists while containers are running.
 
+The backend settings can be configured with environment variables:
+
+| Variable | Local default | Purpose |
+| --- | ---: | --- |
+| `TOTAL_CAPACITY` | `100` | Maximum number of tickets |
+| `TICKET_PRICE_CENTS` | `1000` | Price per ticket in cents |
+| `RESERVATION_TTL_HOURS` | `48` | Reservation lifetime before expiry |
+| `ING_PAYMENT_LINK` | Demo URL | Payment link shown on the private page |
+
+For production, set these values through the deployment environment rather than committing real payment links to Compose.
+
 ## Testing the reservation flow
 
 ### 1. Open the frontend

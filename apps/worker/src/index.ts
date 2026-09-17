@@ -1,5 +1,6 @@
 import cors from 'cors';
 import express, { type Request, type Response } from 'express';
+import { config } from './config.js';
 import { cancelReservation, createReservation, expireReservations, extendReservation, findReservationByToken, getAvailableCapacity, getReservationStatusSummary, listOrders, listTickets, markOrderPaid, markTicketUsed } from './services.js';
 import { sendReservationEmail } from './email.js';
 
@@ -15,7 +16,7 @@ app.get('/api/health', (_req: Request, res: Response) => {
 
 app.get('/api/capacity', (_req: Request, res: Response) => {
   expireReservations();
-  res.json({ totalCapacity: 100, available: getAvailableCapacity() });
+  res.json({ totalCapacity: config.totalCapacity, available: getAvailableCapacity() });
 });
 
 app.post('/api/reservations', async (req: Request, res: Response) => {
@@ -73,7 +74,7 @@ app.get('/api/reservations/:orderNumber/:token', (req: Request, res: Response) =
     createdAt: reservation.created_at,
     expiresAt: reservation.expires_at,
     expired: now > expiresAt,
-    paymentLink: 'https://www.ing.nl/payreq/m/?trxid=example-demo-link',
+    paymentLink: config.paymentLink,
     tickets: reservation.status === 'PAID' ? listTickets(reservation.order_number) : [],
   });
 });

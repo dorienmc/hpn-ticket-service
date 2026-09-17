@@ -49,7 +49,7 @@ async function initApp() {
 
       if (summaryContainer) {
         summaryContainer.innerHTML = `
-          <div class="summary-tile"><span>Total capacity</span><strong>${100}</strong></div>
+          <div class="summary-tile"><span>Total capacity</span><strong>${summary.totalCapacity ?? 0}</strong></div>
           <div class="summary-tile"><span>Reserved</span><strong>${summary.reserved ?? 0}</strong></div>
           <div class="summary-tile"><span>Paid</span><strong>${summary.paid ?? 0}</strong></div>
           <div class="summary-tile"><span>Available</span><strong>${summary.available ?? 0}</strong></div>
