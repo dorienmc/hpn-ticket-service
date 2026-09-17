@@ -1,6 +1,6 @@
 import cors from 'cors';
 import express, { type Request, type Response } from 'express';
-import { cancelReservation, createReservation, expireReservations, extendReservation, findReservationByToken, getAvailableCapacity, getReservationStatusSummary, listOrders, listTickets, markOrderPaid } from './services.js';
+import { cancelReservation, createReservation, expireReservations, extendReservation, findReservationByToken, getAvailableCapacity, getReservationStatusSummary, listOrders, listTickets, markOrderPaid, markTicketUsed } from './services.js';
 import { sendReservationEmail } from './email.js';
 
 const app = express();
@@ -144,6 +144,21 @@ app.post('/api/admin/orders/:orderNumber/resend', async (req: Request, res: Resp
   res.json({ orderNumber: reservation.order_number, email: reservation.email });
 });
 
+app.post('/api/admin/tickets/:ticketCode/use', (req: Request, res: Response) => {
+  const ticket = markTicketUsed(req.params.ticketCode);
+
+  if (!ticket) {
+    res.status(400).json({ error: 'Ticket does not exist or has already been used' });
+    return;
+  }
+
+  res.json({
+    ticketCode: ticket.ticket_code,
+    status: ticket.status,
+    usedAt: ticket.used_at,
+  });
+});
+
 app.get('/api/admin/summary', (_req: Request, res: Response) => {
   expireReservations();
   res.json(getReservationStatusSummary());
@@ -151,7 +166,12 @@ app.get('/api/admin/summary', (_req: Request, res: Response) => {
 
 app.get('/api/admin/orders', (_req: Request, res: Response) => {
   expireReservations();
-  res.json({ orders: listOrders() });
+  res.json({
+    orders: listOrders().map((order) => ({
+      ...order,
+      tickets: listTickets(order.order_number),
+    })),
+  });
 });
 
 app.listen(port, '0.0.0.0', () => {

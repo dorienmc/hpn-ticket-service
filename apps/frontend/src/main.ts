@@ -110,6 +110,11 @@ async function initApp() {
                             <button class="admin-button danger" data-action="cancel" data-order="${order.order_number}">Cancel</button>
                             <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}">Resend email</button>
                           </div>`
+                        : order.status === 'PAID'
+                          ? `<div class="admin-actions">
+                              ${order.tickets?.map((ticket: { ticket_code: string; status: string }) => `<button class="admin-button ${ticket.status === 'USED' ? 'secondary' : ''}" data-action="checkin" data-ticket="${ticket.ticket_code}" data-order="${order.order_number}" ${ticket.status === 'USED' ? 'disabled' : ''}>${ticket.ticket_code}: ${ticket.status === 'USED' ? 'Used' : 'Check in'}</button>`).join('') ?? ''}
+                              <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}">Resend email</button>
+                            </div>`
                         : `<div class="admin-actions">
                             <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}">Resend email</button>
                           </div>`}
@@ -136,7 +141,11 @@ async function initApp() {
               }
 
               button.disabled = true;
-              const response = await fetch(`${baseUrl}/api/admin/orders/${encodeURIComponent(orderNumber)}/${action}`, {
+              const ticketCode = button.dataset.ticket;
+              const endpoint = action === 'checkin'
+                ? `${baseUrl}/api/admin/tickets/${encodeURIComponent(ticketCode ?? '')}/use`
+                : `${baseUrl}/api/admin/orders/${encodeURIComponent(orderNumber)}/${action}`;
+              const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: action === 'extend' ? { 'Content-Type': 'application/json' } : undefined,
                 body: action === 'extend' ? JSON.stringify({ hours: 24 }) : undefined,
@@ -155,11 +164,17 @@ async function initApp() {
                   ? `Order ${payload.orderNumber} extended by 24 hours.`
                   : action === 'cancel'
                     ? `Order ${payload.orderNumber} cancelled.`
-                    : `Reservation email resent to ${payload.email}.`;
+                    : action === 'checkin'
+                      ? `Ticket ${payload.ticketCode} checked in.`
+                      : `Reservation email resent to ${payload.email}.`;
                     const order = orders.find((candidate: any) => candidate.order_number === orderNumber);
                     if (order && action === 'pay') order.status = 'PAID';
                     if (order && action === 'cancel') order.status = 'CANCELLED';
                     if (order && action === 'extend') order.expires_at = payload.expiresAt;
+              if (order && action === 'checkin') {
+                const ticket = order.tickets.find((candidate: any) => candidate.ticket_code === ticketCode);
+                if (ticket) ticket.status = 'USED';
+              }
                     if (adminStatus) adminStatus.textContent = message;
                     renderOrders();
             });

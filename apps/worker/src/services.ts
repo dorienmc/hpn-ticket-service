@@ -133,6 +133,25 @@ export function listTickets(orderNumber: string): TicketRecord[] {
   `).all(orderNumber) as TicketRecord[];
 }
 
+export function markTicketUsed(ticketCode: string): TicketRecord | null {
+  const db = getDb();
+  const ticket = db.prepare(`
+    SELECT * FROM tickets WHERE ticket_code = ? AND status = 'VALID'
+  `).get(ticketCode) as TicketRecord | undefined;
+
+  if (!ticket) {
+    return null;
+  }
+
+  db.prepare(`
+    UPDATE tickets
+    SET status = 'USED', used_at = ?
+    WHERE ticket_code = ? AND status = 'VALID'
+  `).run(new Date().toISOString(), ticketCode);
+
+  return db.prepare(`SELECT * FROM tickets WHERE ticket_code = ?`).get(ticketCode) as TicketRecord;
+}
+
 export function cancelReservation(orderNumber: string): ReservationRecord | null {
   const db = getDb();
   const reservation = findReservationByOrderNumber(orderNumber);

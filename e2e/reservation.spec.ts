@@ -43,6 +43,12 @@ test('admin can mark a reservation as paid', async ({ page, request }) => {
   await page.goto(reservation.paymentUrl);
   await expect(page.getByRole('heading', { name: 'Your tickets' })).toBeVisible();
   await expect(page.locator('.ticket-list li')).toHaveCount(1);
+
+  await page.goto('/admin');
+  const paidOrderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
+  await expect(paidOrderRow.getByRole('button', { name: /HP9-TKT-.*Check in/ })).toBeVisible();
+  await paidOrderRow.getByRole('button', { name: /HP9-TKT-.*Check in/ }).click();
+  await expect(page.getByText(/Ticket HP9-TKT-.* checked in\./)).toBeVisible();
 });
 
 test('admin can filter orders by search and status', async ({ page, request }) => {

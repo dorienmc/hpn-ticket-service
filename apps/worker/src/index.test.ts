@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { cancelReservation, createReservation, extendReservation, getAvailableCapacity, expireReservations, findReservationByToken, listOrders, listTickets, markOrderPaid, getReservationStatusSummary } from './services.js';
+import { cancelReservation, createReservation, extendReservation, getAvailableCapacity, expireReservations, findReservationByToken, listOrders, listTickets, markOrderPaid, markTicketUsed, getReservationStatusSummary } from './services.js';
 import { getDb } from './db.js';
 
 beforeEach(() => {
@@ -65,6 +65,10 @@ describe('reservation flow', () => {
 
     markOrderPaid(reservation.order_number);
     expect(listTickets(reservation.order_number)).toHaveLength(3);
+
+    const checkedIn = markTicketUsed(tickets[0].ticket_code);
+    expect(checkedIn?.status).toBe('USED');
+    expect(markTicketUsed(tickets[0].ticket_code)).toBeNull();
 
     const summary = getReservationStatusSummary();
     expect(summary.paid).toBe(1);
