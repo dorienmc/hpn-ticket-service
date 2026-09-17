@@ -27,6 +27,7 @@ The backend settings can be configured with environment variables:
 | Variable | Local default | Purpose |
 | --- | ---: | --- |
 | `TOTAL_CAPACITY` | `100` | Maximum number of tickets |
+| `MAX_TICKETS_PER_RESERVATION` | `5` | Maximum tickets in one reservation |
 | `TICKET_PRICE_CENTS` | `1000` | Price per ticket in cents |
 | `RESERVATION_TTL_HOURS` | `48` | Reservation lifetime before expiry |
 | `ING_PAYMENT_LINK` | Demo URL | Payment link shown on the private page |

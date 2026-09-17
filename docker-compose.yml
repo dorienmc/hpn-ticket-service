@@ -13,6 +13,7 @@ services:
     command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
     environment:
       VITE_API_BASE_URL: http://localhost:8787
+      VITE_MAX_TICKETS_PER_RESERVATION: 5
     depends_on:
       - backend
 
@@ -35,6 +36,7 @@ services:
       FRONTEND_URL: http://localhost:5173
       JWT_SECRET: dev-secret
       TOTAL_CAPACITY: 100
+      MAX_TICKETS_PER_RESERVATION: 5
       TICKET_PRICE_CENTS: 1000
       RESERVATION_TTL_HOURS: 48
       ING_PAYMENT_LINK: https://www.ing.nl/payreq/m/?trxid=example-demo-link

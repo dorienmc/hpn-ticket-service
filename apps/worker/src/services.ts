@@ -39,8 +39,8 @@ export function createReservation(input: ReservationInput): ReservationRecord {
   const email = input.email.trim();
   const quantity = Number(input.quantity);
 
-  if (!name || !email || !Number.isInteger(quantity) || quantity < 1) {
-    throw new Error('Invalid reservation payload');
+  if (!name || !email || !Number.isInteger(quantity) || quantity < 1 || quantity > config.maxTicketsPerReservation) {
+    throw new Error(`Quantity must be between 1 and ${config.maxTicketsPerReservation}`);
   }
 
   const now = new Date();

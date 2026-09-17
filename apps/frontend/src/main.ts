@@ -7,6 +7,7 @@ if (!app) {
 }
 
 const baseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8787';
+const maxTickets = import.meta.env.VITE_MAX_TICKETS_PER_RESERVATION ?? '5';
 const path = window.location.pathname;
 
 async function initApp() {
@@ -310,7 +311,7 @@ async function initApp() {
 
           <label>
             Number of tickets
-            <input id="quantity" name="quantity" type="number" min="1" max="10" value="1" required />
+            <input id="quantity" name="quantity" type="number" min="1" max="${maxTickets}" value="1" required />
           </label>
 
           <button type="submit">Reserve tickets</button>

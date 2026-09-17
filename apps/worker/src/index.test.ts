@@ -19,11 +19,16 @@ describe('reservation flow', () => {
     expect(reservation.quantity).toBe(2);
   });
 
-  it('returns capacity based on active reservations', () => {
-    createReservation({ name: 'A', email: 'a@example.com', quantity: 10 });
-    createReservation({ name: 'B', email: 'b@example.com', quantity: 5 });
+  it('rejects invalid reservation quantities', () => {
+    expect(() => createReservation({ name: 'Invalid', email: 'invalid@example.com', quantity: 0 })).toThrow();
+    expect(() => createReservation({ name: 'Too many', email: 'many@example.com', quantity: 6 })).toThrow();
+  });
 
-    expect(getAvailableCapacity()).toBe(85);
+  it('returns capacity based on active reservations', () => {
+    createReservation({ name: 'A', email: 'a@example.com', quantity: 5 });
+    createReservation({ name: 'B', email: 'b@example.com', quantity: 4 });
+
+    expect(getAvailableCapacity()).toBe(91);
   });
 
   it('expires stale reservations and releases capacity', () => {
