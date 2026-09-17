@@ -241,6 +241,17 @@ async function initApp() {
               </div>
             `;
 
+        const ticketSection = payload.status === 'PAID' && payload.tickets?.length
+          ? `
+            <div class="payment-box success-box">
+              <h2>Your tickets</h2>
+              <ul class="ticket-list">
+                ${payload.tickets.map((ticket: { ticket_code: string; status: string }) => `<li><strong>${ticket.ticket_code}</strong><span>${ticket.status}</span></li>`).join('')}
+              </ul>
+            </div>
+          `
+          : '';
+
         container.innerHTML = `
           <div class="status-header">
             ${statusMarkup}
@@ -254,6 +265,7 @@ async function initApp() {
             <div><dt>Expires</dt><dd>${expiresAt}</dd></div>
           </dl>
           ${paymentSection}
+          ${ticketSection}
         `;
       } catch (error) {
         container.innerHTML = `

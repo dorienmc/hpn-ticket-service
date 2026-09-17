@@ -20,3 +20,14 @@ export interface ReservationInput {
   email: string;
   quantity: number;
 }
+
+export type TicketStatus = 'VALID' | 'USED';
+
+export interface TicketRecord {
+  id: number;
+  order_id: number;
+  ticket_code: string;
+  status: TicketStatus;
+  created_at: string;
+  used_at: string | null;
+}

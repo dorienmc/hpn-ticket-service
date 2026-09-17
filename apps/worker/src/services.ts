@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from './db.js';
-import type { ReservationInput, ReservationRecord, ReservationStatus } from './types.js';
+import type { ReservationInput, ReservationRecord, ReservationStatus, TicketRecord } from './types.js';
 
 const TOTAL_CAPACITY = 100;
 const TICKET_PRICE_CENTS = 1000;
@@ -14,6 +14,10 @@ function generateOrderNumber(): string {
 
 function generateAccessToken(): string {
   return randomUUID().replace(/-/g, '');
+}
+
+function generateTicketCode(): string {
+  return `HP9-TKT-${randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()}`;
 }
 
 function addHoursToIsoString(date: Date, hours: number): string {
@@ -98,7 +102,35 @@ export function markOrderPaid(orderNumber: string): ReservationRecord | null {
     WHERE order_number = ?
   `).run('PAID', now, orderNumber);
 
+  const existingTickets = db.prepare(`
+    SELECT COUNT(*) AS count FROM tickets WHERE order_id = ?
+  `).get(reservation.id) as { count: number };
+
+  if (existingTickets.count === 0) {
+    const insertTicket = db.prepare(`
+      INSERT INTO tickets (order_id, ticket_code, status, created_at, used_at)
+      VALUES (?, ?, 'VALID', ?, NULL)
+    `);
+    const createTickets = db.transaction((quantity: number) => {
+      for (let index = 0; index < quantity; index += 1) {
+        insertTicket.run(reservation.id, generateTicketCode(), now);
+      }
+    });
+    createTickets(reservation.quantity);
+  }
+
   return findReservationByOrderNumber(orderNumber);
+}
+
+export function listTickets(orderNumber: string): TicketRecord[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT tickets.*
+    FROM tickets
+    INNER JOIN orders ON orders.id = tickets.order_id
+    WHERE orders.order_number = ?
+    ORDER BY tickets.id ASC
+  `).all(orderNumber) as TicketRecord[];
 }
 
 export function cancelReservation(orderNumber: string): ReservationRecord | null {

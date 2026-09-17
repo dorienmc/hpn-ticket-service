@@ -12,3 +12,13 @@ CREATE TABLE IF NOT EXISTS orders (
     paid_at TEXT,
     notes TEXT
 );
+
+CREATE TABLE IF NOT EXISTS tickets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL,
+    ticket_code TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'VALID',
+    created_at TEXT NOT NULL,
+    used_at TEXT,
+    FOREIGN KEY (order_id) REFERENCES orders(id)
+);

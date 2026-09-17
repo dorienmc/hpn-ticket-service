@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { cancelReservation, createReservation, extendReservation, getAvailableCapacity, expireReservations, findReservationByToken, listOrders, markOrderPaid, getReservationStatusSummary } from './services.js';
+import { cancelReservation, createReservation, extendReservation, getAvailableCapacity, expireReservations, findReservationByToken, listOrders, listTickets, markOrderPaid, getReservationStatusSummary } from './services.js';
 import { getDb } from './db.js';
 
 beforeEach(() => {
   const db = getDb();
+  db.exec('DELETE FROM tickets');
   db.exec('DELETE FROM orders');
 });
 
@@ -56,6 +57,14 @@ describe('reservation flow', () => {
 
     const updated = markOrderPaid(reservation.order_number);
     expect(updated?.status).toBe('PAID');
+
+    const tickets = listTickets(reservation.order_number);
+    expect(tickets).toHaveLength(3);
+    expect(new Set(tickets.map((ticket) => ticket.ticket_code)).size).toBe(3);
+    expect(tickets.every((ticket) => ticket.status === 'VALID')).toBe(true);
+
+    markOrderPaid(reservation.order_number);
+    expect(listTickets(reservation.order_number)).toHaveLength(3);
 
     const summary = getReservationStatusSummary();
     expect(summary.paid).toBe(1);

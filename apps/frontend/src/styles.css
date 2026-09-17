@@ -254,6 +254,22 @@ select {
   border-color: #e5e7eb;
 }
 
+.ticket-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ticket-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #bbf7d0;
+}
+
 .error-message {
   color: #b91c1c;
   font-weight: 600;

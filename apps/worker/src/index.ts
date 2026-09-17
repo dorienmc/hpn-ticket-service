@@ -1,6 +1,6 @@
 import cors from 'cors';
 import express, { type Request, type Response } from 'express';
-import { cancelReservation, createReservation, expireReservations, extendReservation, findReservationByToken, getAvailableCapacity, getReservationStatusSummary, listOrders, markOrderPaid } from './services.js';
+import { cancelReservation, createReservation, expireReservations, extendReservation, findReservationByToken, getAvailableCapacity, getReservationStatusSummary, listOrders, listTickets, markOrderPaid } from './services.js';
 import { sendReservationEmail } from './email.js';
 
 const app = express();
@@ -74,6 +74,7 @@ app.get('/api/reservations/:orderNumber/:token', (req: Request, res: Response) =
     expiresAt: reservation.expires_at,
     expired: now > expiresAt,
     paymentLink: 'https://www.ing.nl/payreq/m/?trxid=example-demo-link',
+    tickets: reservation.status === 'PAID' ? listTickets(reservation.order_number) : [],
   });
 });
 

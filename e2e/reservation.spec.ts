@@ -39,6 +39,10 @@ test('admin can mark a reservation as paid', async ({ page, request }) => {
 
   await expect(page.getByText(`Order ${reservation.orderNumber} marked as paid.`)).toBeVisible();
   await expect(page.locator('tr').filter({ hasText: reservation.orderNumber })).toContainText('PAID');
+
+  await page.goto(reservation.paymentUrl);
+  await expect(page.getByRole('heading', { name: 'Your tickets' })).toBeVisible();
+  await expect(page.locator('.ticket-list li')).toHaveCount(1);
 });
 
 test('admin can filter orders by search and status', async ({ page, request }) => {
