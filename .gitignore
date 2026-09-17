@@ -8,3 +8,5 @@ dist/
 .DS_Store
 apps/frontend/dist/
 apps/worker/dist/
+test-results/
+playwright-report/

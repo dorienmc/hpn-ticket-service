@@ -4,6 +4,20 @@ function uniqueEmail(): string {
   return `e2e-${Date.now()}@example.com`;
 }
 
+async function loginAsMockGoogleAdmin(page: import('@playwright/test').Page): Promise<void> {
+  await page.goto('http://localhost:8787/api/auth/google');
+  await expect(page).toHaveURL(/\/admin$/);
+}
+
+test('admin page requires Google login', async ({ page }) => {
+  await page.goto('/admin');
+
+  await expect(page.getByRole('heading', { name: 'Overzicht reserveringen' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Inloggen met Google' })).toBeVisible();
+  await expect(page.locator('#admin-summary')).toBeEmpty();
+  await expect(page.locator('#admin-list')).toBeEmpty();
+});
+
 test('customer can create a reservation and view its private status page', async ({ page }) => {
   await page.goto('/');
 
@@ -31,7 +45,7 @@ test('admin can mark a reservation as paid', async ({ page, request }) => {
   expect(response.ok()).toBeTruthy();
   const reservation = await response.json();
 
-  await page.goto('/admin');
+  await loginAsMockGoogleAdmin(page);
   const orderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
   await expect(orderRow).toBeVisible();
 
@@ -44,7 +58,7 @@ test('admin can mark a reservation as paid', async ({ page, request }) => {
   await expect(page.getByRole('heading', { name: 'Je tickets' })).toBeVisible();
   await expect(page.locator('.ticket-list li')).toHaveCount(1);
 
-  await page.goto('/admin');
+  await loginAsMockGoogleAdmin(page);
   const paidOrderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
   await expect(paidOrderRow.getByRole('button', { name: /HP9-TKT-.*Inchecken/ })).toBeVisible();
   await paidOrderRow.getByRole('button', { name: /HP9-TKT-.*Inchecken/ }).click();
@@ -63,7 +77,7 @@ test('admin can filter orders by search and status', async ({ page, request }) =
   expect(response.ok()).toBeTruthy();
   const reservation = await response.json();
 
-  await page.goto('/admin');
+  await loginAsMockGoogleAdmin(page);
   const orderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
   await expect(orderRow).toBeVisible();
 

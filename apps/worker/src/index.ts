@@ -6,9 +6,48 @@ import { sendReservationEmail } from './email.js';
 
 const app = express();
 const port = Number(process.env.PORT || 8787);
+const mockAdminCookie = 'hpn_mock_google_admin=authenticated';
 
-app.use(cors());
+app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173', credentials: true }));
 app.use(express.json());
+
+function isAdminAuthenticated(req: Request): boolean {
+  return req.headers.cookie?.split(';').some((cookie) => cookie.trim() === mockAdminCookie) ?? false;
+}
+
+function requireAdmin(req: Request, res: Response, next: () => void): void {
+  if (!config.mockGoogleLogin || !isAdminAuthenticated(req)) {
+    res.status(401).json({ error: 'Admin authentication required' });
+    return;
+  }
+
+  next();
+}
+
+app.get('/api/auth/google', (_req: Request, res: Response) => {
+  if (!config.mockGoogleLogin) {
+    res.status(404).json({ error: 'Local Google login mock is disabled' });
+    return;
+  }
+
+  const email = String(_req.query.email || config.mockGoogleEmail).trim().toLowerCase();
+  if (!config.adminAllowedEmails.includes(email)) {
+    res.status(403).json({ error: 'This Google account is not allowed to access the admin area' });
+    return;
+  }
+
+  res.setHeader('Set-Cookie', `${mockAdminCookie}; Path=/; HttpOnly; SameSite=Lax`);
+  res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/admin`);
+});
+
+app.get('/api/auth/session', (req: Request, res: Response) => {
+  res.json({ authenticated: config.mockGoogleLogin && isAdminAuthenticated(req), provider: 'google' });
+});
+
+app.post('/api/auth/logout', (_req: Request, res: Response) => {
+  res.setHeader('Set-Cookie', 'hpn_mock_google_admin=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+  res.status(204).send();
+});
 
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({ ok: true, status: 'healthy' });
@@ -50,7 +89,7 @@ app.post('/api/reservations', async (req: Request, res: Response) => {
 });
 
 app.get('/api/reservations/:orderNumber/:token', (req: Request, res: Response) => {
-  const reservation = findReservationByToken(req.params.token);
+  const reservation = findReservationByToken(String(req.params.token));
 
   if (!reservation || reservation.order_number !== req.params.orderNumber) {
     res.status(404).json({ error: 'Reservation not found' });
@@ -79,8 +118,10 @@ app.get('/api/reservations/:orderNumber/:token', (req: Request, res: Response) =
   });
 });
 
+app.use('/api/admin', requireAdmin);
+
 app.post('/api/admin/orders/:orderNumber/pay', (req: Request, res: Response) => {
-  const updatedReservation = markOrderPaid(req.params.orderNumber);
+  const updatedReservation = markOrderPaid(String(req.params.orderNumber));
 
   if (!updatedReservation) {
     res.status(404).json({ error: 'Order not found' });
@@ -95,7 +136,7 @@ app.post('/api/admin/orders/:orderNumber/pay', (req: Request, res: Response) => 
 });
 
 app.post('/api/admin/orders/:orderNumber/cancel', (req: Request, res: Response) => {
-  const updatedReservation = cancelReservation(req.params.orderNumber);
+  const updatedReservation = cancelReservation(String(req.params.orderNumber));
 
   if (!updatedReservation) {
     res.status(400).json({ error: 'Only active reserved orders can be cancelled' });
@@ -110,7 +151,7 @@ app.post('/api/admin/orders/:orderNumber/cancel', (req: Request, res: Response) 
 
 app.post('/api/admin/orders/:orderNumber/extend', (req: Request, res: Response) => {
   const hours = Number(req.body?.hours ?? 24);
-  const updatedReservation = extendReservation(req.params.orderNumber, hours);
+  const updatedReservation = extendReservation(String(req.params.orderNumber), hours);
 
   if (!updatedReservation) {
     res.status(400).json({ error: 'Only active reserved orders can be extended with a positive whole number of hours' });
@@ -125,7 +166,7 @@ app.post('/api/admin/orders/:orderNumber/extend', (req: Request, res: Response) 
 });
 
 app.post('/api/admin/orders/:orderNumber/resend', async (req: Request, res: Response) => {
-  const reservation = listOrders().find((order) => order.order_number === req.params.orderNumber);
+  const reservation = listOrders().find((order) => order.order_number === String(req.params.orderNumber));
 
   if (!reservation) {
     res.status(404).json({ error: 'Order not found' });
@@ -146,7 +187,7 @@ app.post('/api/admin/orders/:orderNumber/resend', async (req: Request, res: Resp
 });
 
 app.post('/api/admin/tickets/:ticketCode/use', (req: Request, res: Response) => {
-  const ticket = markTicketUsed(req.params.ticketCode);
+  const ticket = markTicketUsed(String(req.params.ticketCode));
 
   if (!ticket) {
     res.status(400).json({ error: 'Ticket does not exist or has already been used' });

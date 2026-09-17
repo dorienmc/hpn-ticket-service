@@ -29,6 +29,10 @@ async function initApp() {
           <p class="eyebrow">Beheer</p>
           <h1>Overzicht reserveringen</h1>
           <div id="admin-summary" class="summary-grid"></div>
+          <div id="admin-login" class="payment-box muted-box" hidden>
+            <p>Log in om reserveringen te beheren.</p>
+            <a class="primary-link" href="${baseUrl}/api/auth/google">Inloggen met Google</a>
+          </div>
           <div class="admin-filters">
             <label>
               Reserveringen zoeken
@@ -54,9 +58,18 @@ async function initApp() {
     const summaryContainer = document.querySelector('#admin-summary');
     const listContainer = document.querySelector('#admin-list');
     const adminStatus = document.querySelector<HTMLParagraphElement>('#admin-status');
+    const loginContainer = document.querySelector<HTMLDivElement>('#admin-login');
 
     try {
-      const summaryResponse = await fetch(`${baseUrl}/api/admin/summary`);
+      const sessionResponse = await fetch(`${baseUrl}/api/auth/session`, { credentials: 'include' });
+      const session = await sessionResponse.json();
+
+      if (!session.authenticated) {
+        if (loginContainer) loginContainer.hidden = false;
+        return;
+      }
+
+      const summaryResponse = await fetch(`${baseUrl}/api/admin/summary`, { credentials: 'include' });
       const summary = await summaryResponse.json();
 
       if (summaryContainer) {
@@ -70,7 +83,7 @@ async function initApp() {
         `;
       }
 
-      const ordersResponse = await fetch(`${baseUrl}/api/admin/orders`);
+      const ordersResponse = await fetch(`${baseUrl}/api/admin/orders`, { credentials: 'include' });
       const ordersData = await ordersResponse.json();
       const orders = ordersData.orders ?? [];
 
@@ -159,6 +172,7 @@ async function initApp() {
                 : `${baseUrl}/api/admin/orders/${encodeURIComponent(orderNumber)}/${action}`;
               const response = await fetch(endpoint, {
                 method: 'POST',
+                credentials: 'include',
                 headers: action === 'extend' ? { 'Content-Type': 'application/json' } : undefined,
                 body: action === 'extend' ? JSON.stringify({ hours: 24 }) : undefined,
               });
