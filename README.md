@@ -6,6 +6,15 @@ This project is a small ticket reservation MVP for Half Past Nine. It runs local
 - a SQLite database
 - Mailpit for email capture in development
 
+## TODOs
+
+- [ ] Send mail after payment is confirmed?
+- [ ] Use HP9 styling in emails
+- [ ] Get things working in production
+- [ ] CI/CD pipeline
+- [ ] Ticket QR code support
+- [x] Ticket check-in support (manual check-in via admin UI)
+
 ## Local development with Docker Compose
 
 From the project root, start all services:
