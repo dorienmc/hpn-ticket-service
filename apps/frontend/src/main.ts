@@ -17,14 +17,14 @@ function statusLabel(status: string): string {
     EXPIRED: 'Verlopen',
     CANCELLED: 'Geannuleerd',
     VALID: 'Geldig',
-    USED: 'Gebruikt',
+    USED: 'Ingecheckt',
   }[status] ?? status;
 }
 
 async function initApp() {
   if (path.startsWith('/admin')) {
     app.innerHTML = `
-      <main class="page">
+      <main class="page page--admin">
         <section class="card reservation-card">
           <p class="eyebrow">Beheer</p>
           <h1>Overzicht reserveringen</h1>
@@ -33,32 +33,40 @@ async function initApp() {
             <p>Log in om reserveringen te beheren.</p>
             <a class="primary-link" href="${baseUrl}/api/auth/google">Inloggen met Google</a>
           </div>
-          <div class="admin-filters">
-            <label>
-              Reserveringen zoeken
-              <input id="order-search" type="search" placeholder="Ordernummer, naam of e-mail" />
-            </label>
-            <label>
-              Status
-              <select id="status-filter">
-                  <option value="ALL">Alle</option>
-                  <option value="RESERVED">Gereserveerd</option>
-                  <option value="PAID">Betaald</option>
-                  <option value="EXPIRED">Verlopen</option>
-                  <option value="CANCELLED">Geannuleerd</option>
-              </select>
-            </label>
+          <div id="admin-content" hidden>
+            <div class="admin-toolbar">
+              <button id="admin-logout" class="admin-button secondary">Uitloggen</button>
+            </div>
+            <div class="admin-filters">
+              <label>
+                Reserveringen zoeken
+                <input id="order-search" type="search" placeholder="Ordernummer, naam of e-mail" />
+              </label>
+            </div>
+            <div id="admin-tabs" class="admin-tabs">
+              <button class="tab-button" data-tab="RESERVED">Gereserveerd</button>
+              <button class="tab-button" data-tab="PAID">Betaald</button>
+              <button class="tab-button" data-tab="ARCHIVE">Verlopen / geannuleerd</button>
+            </div>
+            <div id="admin-list" class="admin-list"></div>
           </div>
-          <div id="admin-list" class="admin-list"></div>
           <p id="admin-status" class="status" aria-live="polite"></p>
         </section>
       </main>
+      <dialog id="ticket-modal" class="ticket-modal">
+        <div class="ticket-modal-header">
+          <h2 id="ticket-modal-title">Tickets</h2>
+          <button class="admin-button secondary" data-action="close-modal">Sluiten</button>
+        </div>
+        <div id="ticket-modal-body"></div>
+      </dialog>
     `;
 
     const summaryContainer = document.querySelector('#admin-summary');
     const listContainer = document.querySelector('#admin-list');
     const adminStatus = document.querySelector<HTMLParagraphElement>('#admin-status');
     const loginContainer = document.querySelector<HTMLDivElement>('#admin-login');
+    const contentContainer = document.querySelector<HTMLDivElement>('#admin-content');
 
     try {
       const sessionResponse = await fetch(`${baseUrl}/api/auth/session`, { credentials: 'include' });
@@ -68,6 +76,20 @@ async function initApp() {
         if (loginContainer) loginContainer.hidden = false;
         return;
       }
+
+      if (contentContainer) contentContainer.hidden = false;
+
+      const ticketModalCloseButton = document.querySelector<HTMLButtonElement>('#ticket-modal [data-action="close-modal"]');
+      ticketModalCloseButton?.addEventListener('click', () => {
+        document.querySelector<HTMLDialogElement>('#ticket-modal')?.close();
+      });
+
+      const logoutButton = document.querySelector<HTMLButtonElement>('#admin-logout');
+      logoutButton?.addEventListener('click', async () => {
+        logoutButton.disabled = true;
+        await fetch(`${baseUrl}/api/auth/logout`, { method: 'POST', credentials: 'include' });
+        window.location.reload();
+      });
 
       const summaryResponse = await fetch(`${baseUrl}/api/admin/summary`, { credentials: 'include' });
       const summary = await summaryResponse.json();
@@ -87,17 +109,34 @@ async function initApp() {
       const ordersData = await ordersResponse.json();
       const orders = ordersData.orders ?? [];
 
+      async function refreshOrders() {
+        const response = await fetch(`${baseUrl}/api/admin/orders`, { credentials: 'include' });
+        const data = await response.json();
+        orders.length = 0;
+        orders.push(...(data.orders ?? []));
+      }
+
       if (listContainer) {
         const searchInput = document.querySelector<HTMLInputElement>('#order-search');
-        const statusFilter = document.querySelector<HTMLSelectElement>('#status-filter');
+        const tabButtons = document.querySelectorAll<HTMLButtonElement>('#admin-tabs [data-tab]');
+        let activeTab: 'RESERVED' | 'PAID' | 'ARCHIVE' = 'RESERVED';
+
+        const setActiveTab = (tab: typeof activeTab) => {
+          activeTab = tab;
+          tabButtons.forEach((tabButton) => {
+            tabButton.classList.toggle('active', tabButton.dataset.tab === tab);
+          });
+          renderOrders();
+        };
 
         const renderOrders = () => {
           const searchTerm = searchInput?.value.trim().toLowerCase() ?? '';
-          const selectedStatus = statusFilter?.value ?? 'ALL';
           const filteredOrders = orders.filter((order: any) => {
             const searchable = `${order.order_number} ${order.name} ${order.email}`.toLowerCase();
-            return (!searchTerm || searchable.includes(searchTerm))
-              && (selectedStatus === 'ALL' || order.status === selectedStatus);
+            const matchesTab = activeTab === 'ARCHIVE'
+              ? (order.status === 'EXPIRED' || order.status === 'CANCELLED')
+              : order.status === activeTab;
+            return (!searchTerm || searchable.includes(searchTerm)) && matchesTab;
           });
 
           if (!filteredOrders.length) {
@@ -130,18 +169,25 @@ async function initApp() {
                     <td>
                       ${order.status === 'RESERVED'
                         ? `<div class="admin-actions">
-                            <button class="admin-button" data-action="pay" data-order="${order.order_number}">Markeer als betaald</button>
-                            <button class="admin-button secondary" data-action="extend" data-order="${order.order_number}">Verleng 24 uur</button>
-                            <button class="admin-button danger" data-action="cancel" data-order="${order.order_number}">Annuleer</button>
-                            <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}">E-mail opnieuw sturen</button>
+                            <button class="admin-button" data-action="pay" data-order="${order.order_number}"><span aria-hidden="true">✅</span> Markeer als betaald</button>
+                            <button class="admin-button secondary" data-action="extend" data-order="${order.order_number}"><span aria-hidden="true">⏱️</span> Verleng 24 uur</button>
+                            <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}"><span aria-hidden="true">✉️</span> Opnieuw sturen</button>
+                            <button class="admin-button danger" data-action="cancel" data-order="${order.order_number}"><span aria-hidden="true">✕</span> Annuleer</button>
                           </div>`
                         : order.status === 'PAID'
-                          ? `<div class="admin-actions">
-                              ${order.tickets?.map((ticket: { ticket_code: string; status: string }) => `<button class="admin-button ${ticket.status === 'USED' ? 'secondary' : ''}" data-action="checkin" data-ticket="${ticket.ticket_code}" data-order="${order.order_number}" ${ticket.status === 'USED' ? 'disabled' : ''}>${ticket.ticket_code}: ${ticket.status === 'USED' ? 'Gebruikt' : 'Inchecken'}</button>`).join('') ?? ''}
-                              <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}">E-mail opnieuw sturen</button>
-                            </div>`
+                          ? (() => {
+                              const tickets = order.tickets ?? [];
+                              const usedCount = tickets.filter((ticket: { status: string }) => ticket.status === 'USED').length;
+                              return `
+                                <div class="ticket-progress">${usedCount}/${tickets.length} ingecheckt</div>
+                                <div class="admin-actions">
+                                  <button class="admin-button" data-action="open-tickets" data-order="${order.order_number}"><span aria-hidden="true">🎫</span> Tickets inchecken</button>
+                                  <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}"><span aria-hidden="true">✉️</span> Opnieuw sturen</button>
+                                </div>
+                              `;
+                            })()
                         : `<div class="admin-actions">
-                            <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}">E-mail opnieuw sturen</button>
+                            <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}"><span aria-hidden="true">✉️</span> Opnieuw sturen</button>
                           </div>`}
                     </td>
                   </tr>
@@ -150,12 +196,93 @@ async function initApp() {
             </table>
           `;
 
+          const ticketModal = document.querySelector<HTMLDialogElement>('#ticket-modal');
+          const ticketModalTitle = document.querySelector<HTMLHeadingElement>('#ticket-modal-title');
+          const ticketModalBody = document.querySelector<HTMLDivElement>('#ticket-modal-body');
+
+          async function checkinTicket(ticketCode: string) {
+            const response = await fetch(`${baseUrl}/api/admin/tickets/${encodeURIComponent(ticketCode)}/use`, {
+              method: 'POST',
+              credentials: 'include',
+            });
+            const payload = await response.json();
+            if (!response.ok) {
+              throw new Error(payload.error || 'Ticket kon niet worden ingecheckt.');
+            }
+            return payload;
+          }
+
+          function renderTicketModal(order: any) {
+            if (!ticketModal || !ticketModalBody || !ticketModalTitle) return;
+            ticketModalTitle.textContent = `Tickets voor ${order.order_number}`;
+            const tickets = order.tickets ?? [];
+            const remaining = tickets.filter((ticket: any) => ticket.status !== 'USED');
+
+            ticketModalBody.innerHTML = `
+              <button class="admin-button" data-modal-action="checkin-all" ${remaining.length ? '' : 'disabled'}><span aria-hidden="true">✅</span> Alles inchecken</button>
+              <ul class="ticket-modal-list">
+                ${tickets.map((ticket: any) => `
+                  <li>
+                    <span>${ticket.ticket_code}</span>
+                    <span class="ticket-status${ticket.status === 'USED' ? ' used' : ''}">${statusLabel(ticket.status)}</span>
+                    <button class="admin-button secondary" data-modal-action="checkin-one" data-ticket="${ticket.ticket_code}" ${ticket.status === 'USED' ? 'disabled' : ''}><span aria-hidden="true">🎫</span> Inchecken</button>
+                  </li>
+                `).join('')}
+              </ul>
+            `;
+
+            ticketModalBody.querySelector<HTMLButtonElement>('[data-modal-action="checkin-all"]')?.addEventListener('click', async (event) => {
+              const button = event.currentTarget as HTMLButtonElement;
+              button.disabled = true;
+              const targets = tickets.filter((ticket: any) => ticket.status !== 'USED');
+              for (const ticket of targets) {
+                try {
+                  await checkinTicket(ticket.ticket_code);
+                  ticket.status = 'USED';
+                } catch (error) {
+                  alert(error instanceof Error ? error.message : 'Ticket kon niet worden ingecheckt.');
+                }
+              }
+              if (adminStatus) adminStatus.textContent = `Alle tickets van order ${order.order_number} zijn ingecheckt.`;
+              renderTicketModal(order);
+              renderOrders();
+            });
+
+            ticketModalBody.querySelectorAll<HTMLButtonElement>('[data-modal-action="checkin-one"]').forEach((button) => {
+              button.addEventListener('click', async () => {
+                const ticketCode = button.dataset.ticket;
+                if (!ticketCode) return;
+                button.disabled = true;
+                try {
+                  await checkinTicket(ticketCode);
+                  const ticket = tickets.find((candidate: any) => candidate.ticket_code === ticketCode);
+                  if (ticket) ticket.status = 'USED';
+                  if (adminStatus) adminStatus.textContent = `Ticket ${ticketCode} is ingecheckt.`;
+                  renderTicketModal(order);
+                  renderOrders();
+                } catch (error) {
+                  button.disabled = false;
+                  alert(error instanceof Error ? error.message : 'Ticket kon niet worden ingecheckt.');
+                }
+              });
+            });
+          }
+
           const buttons = listContainer.querySelectorAll<HTMLButtonElement>('[data-action][data-order]');
           buttons.forEach((button) => {
             button.addEventListener('click', async () => {
               const orderNumber = button.dataset.order;
               const action = button.dataset.action;
               if (!orderNumber || !action) return;
+
+              if (action === 'open-tickets') {
+                const order = orders.find((candidate: any) => candidate.order_number === orderNumber);
+                if (order) {
+                  renderTicketModal(order);
+                  ticketModal?.showModal();
+                }
+                return;
+              }
 
               const confirmation = action === 'cancel'
                 ? `Reservering ${orderNumber} annuleren? De tickets komen dan weer beschikbaar.`
@@ -166,10 +293,7 @@ async function initApp() {
               }
 
               button.disabled = true;
-              const ticketCode = button.dataset.ticket;
-              const endpoint = action === 'checkin'
-                ? `${baseUrl}/api/admin/tickets/${encodeURIComponent(ticketCode ?? '')}/use`
-                : `${baseUrl}/api/admin/orders/${encodeURIComponent(orderNumber)}/${action}`;
+              const endpoint = `${baseUrl}/api/admin/orders/${encodeURIComponent(orderNumber)}/${action}`;
               const response = await fetch(endpoint, {
                 method: 'POST',
                 credentials: 'include',
@@ -190,17 +314,13 @@ async function initApp() {
                   ? `Order ${payload.orderNumber} is met 24 uur verlengd.`
                   : action === 'cancel'
                     ? `Order ${payload.orderNumber} is geannuleerd.`
-                    : action === 'checkin'
-                      ? `Ticket ${payload.ticketCode} is ingecheckt.`
-                      : `De reserverings-e-mail is opnieuw verstuurd naar ${payload.email}.`;
-                    const order = orders.find((candidate: any) => candidate.order_number === orderNumber);
-                    if (order && action === 'pay') order.status = 'PAID';
-                    if (order && action === 'cancel') order.status = 'CANCELLED';
-                    if (order && action === 'extend') order.expires_at = payload.expiresAt;
-              if (order && action === 'checkin') {
-                const ticket = order.tickets.find((candidate: any) => candidate.ticket_code === ticketCode);
-                if (ticket) ticket.status = 'USED';
-              }
+                    : `De reserverings-e-mail is opnieuw verstuurd naar ${payload.email}.`;
+                    if (action === 'pay' || action === 'cancel') {
+                      await refreshOrders();
+                    } else {
+                      const order = orders.find((candidate: any) => candidate.order_number === orderNumber);
+                      if (order && action === 'extend') order.expires_at = payload.expiresAt;
+                    }
                     if (adminStatus) adminStatus.textContent = message;
                     renderOrders();
             });
@@ -209,8 +329,13 @@ async function initApp() {
         };
 
         searchInput?.addEventListener('input', renderOrders);
-        statusFilter?.addEventListener('change', renderOrders);
-        renderOrders();
+        tabButtons.forEach((tabButton) => {
+          tabButton.addEventListener('click', () => {
+            const tab = tabButton.dataset.tab as typeof activeTab | undefined;
+            if (tab) setActiveTab(tab);
+          });
+        });
+        setActiveTab('RESERVED');
       }
     } catch (error) {
       if (listContainer) {
@@ -273,7 +398,7 @@ async function initApp() {
           : payload.status === 'PAID'
             ? `
               <div class="payment-box success-box">
-                <p>De betaling is ontvangen en de reservering is als betaald gemarkeerd.</p>
+                <p>De betaling is ontvangen.</p>
               </div>
             `
             : `
