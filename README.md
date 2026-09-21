@@ -11,7 +11,7 @@ This project is a small ticket reservation MVP for Half Past Nine. It runs local
 - [ ] Send mail after payment is confirmed?
 - [ ] Use HP9 styling in emails
 - [ ] Get things working in production
-- [ ] CI/CD pipeline
+- [x] CI/CD pipeline (GitHub Actions: worker tests/build, frontend build, e2e)
 - [ ] Ticket QR code support
 - [x] Ticket check-in support (manual check-in via admin UI)
 
