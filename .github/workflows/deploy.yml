@@ -1,0 +1,51 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Deploy frontend to GitHub Pages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: apps/frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: apps/frontend
+        env:
+          VITE_RESERVATIONS_ENABLED: "false"
+        run: npm run build -- --base ./
+
+      - name: Upload frontend build
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/frontend/dist
+
+      - name: Deploy frontend to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

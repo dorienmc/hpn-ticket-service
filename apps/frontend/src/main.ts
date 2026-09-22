@@ -6,8 +6,11 @@ if (!app) {
   throw new Error('App root not found');
 }
 
+const appRoot = app;
+
 const baseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8787';
 const maxTickets = import.meta.env.VITE_MAX_TICKETS_PER_RESERVATION ?? '5';
+const reservationsEnabled = import.meta.env.VITE_RESERVATIONS_ENABLED !== 'false';
 const path = window.location.pathname;
 
 function statusLabel(status: string): string {
@@ -23,7 +26,7 @@ function statusLabel(status: string): string {
 
 async function initApp() {
   if (path.startsWith('/admin')) {
-    app.innerHTML = `
+    appRoot.innerHTML = `
       <main class="page page--admin">
         <section class="card reservation-card">
           <p class="eyebrow">Beheer</p>
@@ -351,7 +354,7 @@ async function initApp() {
     const orderNumber = segments[1];
     const token = segments[2];
 
-    app.innerHTML = `
+    appRoot.innerHTML = `
       <main class="page">
         <section class="card reservation-card">
           <p class="eyebrow">Half Past Nine</p>
@@ -443,7 +446,7 @@ async function initApp() {
     return;
   }
 
-  app.innerHTML = `
+  appRoot.innerHTML = `
     <main class="page">
       <section class="card">
         <p class="eyebrow">Half Past Nine</p>
@@ -464,10 +467,10 @@ async function initApp() {
             <input id="quantity" name="quantity" type="number" min="1" max="${maxTickets}" value="1" required />
           </label>
 
-          <button type="submit">Tickets reserveren</button>
+          <button type="submit" ${reservationsEnabled ? '' : 'disabled'}>Tickets reserveren</button>
         </form>
 
-        <p id="status" class="status" aria-live="polite"></p>
+        <p id="status" class="status" aria-live="polite">${reservationsEnabled ? '' : 'Online reserveren is binnenkort beschikbaar.'}</p>
       </section>
     </main>
   `;
@@ -477,6 +480,11 @@ async function initApp() {
 
   form?.addEventListener('submit', async (event) => {
     event.preventDefault();
+
+    if (!reservationsEnabled) {
+      status!.textContent = 'Online reserveren is binnenkort beschikbaar.';
+      return;
+    }
 
     const formData = new FormData(form);
     const name = String(formData.get('name') ?? '').trim();
