@@ -54,6 +54,15 @@ The backend settings can be configured with environment variables:
 
 For production, set these values through the deployment environment rather than committing real payment links to Compose.
 
+## Production rollout
+
+Production deployment is split into two phases:
+
+1. **GitHub Pages:** `.github/workflows/deploy.yml` builds and publishes the static frontend. This production build sets `VITE_RESERVATIONS_ENABLED=false`, so the reservation button is visible but disabled until the API is available.
+2. **Cloudflare:** deploy the backend as a Cloudflare Worker, migrate persistence to D1, configure Resend and Cloudflare Access, and then set `VITE_RESERVATIONS_ENABLED=true` together with the production `VITE_API_BASE_URL`.
+
+Local development keeps reservations enabled by default.
+
 ## Testing the reservation flow
 
 ### 1. Open the frontend
