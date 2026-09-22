@@ -3,6 +3,8 @@ node_modules/
 dist/
 .env
 .env.*
+.dev.vars
+.wrangler/
 *.log
 *.db
 *.db-shm
@@ -10,5 +12,6 @@ dist/
 .DS_Store
 apps/frontend/dist/
 apps/worker/dist/
+apps/worker/dist-cloudflare/
 test-results/
 playwright-report/

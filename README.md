@@ -2,8 +2,8 @@
 This project is a small ticket reservation MVP for Half Past Nine. It runs locally with Docker Compose and includes:
 
 - a Vite frontend for ticket purchase and admin pages
-- an Express worker API
-- a SQLite database
+- a Cloudflare Worker API running through Wrangler
+- a local Cloudflare D1 database
 - Mailpit for email capture in development
 
 ## Requirements
@@ -40,7 +40,9 @@ This starts:
 - backend API: http://localhost:8787
 - Mailpit UI: http://localhost:8025
 
-The backend uses a SQLite database stored in the repository-backed volume so the data persists while containers are running.
+The backend runs the same Worker entrypoint used in production. Wrangler provides the local Worker runtime and persists the local D1 database in a Docker volume.
+
+Mailpit remains useful because its HTTP Send API is compatible with the Worker runtime. Local Worker email requests go to Mailpit over HTTP; production requests use Resend's HTTP API. Resend itself is a hosted email service and does not run as a local Compose container.
 
 The backend settings can be configured with environment variables:
 

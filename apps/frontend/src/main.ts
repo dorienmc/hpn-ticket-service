@@ -90,7 +90,12 @@ async function initApp() {
       const logoutButton = document.querySelector<HTMLButtonElement>('#admin-logout');
       logoutButton?.addEventListener('click', async () => {
         logoutButton.disabled = true;
-        await fetch(`${baseUrl}/api/auth/logout`, { method: 'POST', credentials: 'include' });
+        const response = await fetch(`${baseUrl}/api/auth/logout`, { method: 'POST', credentials: 'include' });
+        const payload = response.status === 204 ? null : await response.json();
+        if (payload?.logoutUrl) {
+          window.location.href = payload.logoutUrl;
+          return;
+        }
         window.location.reload();
       });
 
