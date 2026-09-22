@@ -5,6 +5,8 @@ dist/
 .env.*
 *.log
 *.db
+*.db-shm
+*.db-wal
 .DS_Store
 apps/frontend/dist/
 apps/worker/dist/
