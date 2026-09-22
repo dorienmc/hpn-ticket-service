@@ -1,0 +1,66 @@
+version: '3.9'
+
+services:
+  frontend:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./apps/frontend:/app
+      - /app/node_modules
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    environment:
+      VITE_API_BASE_URL: http://localhost:8787
+      VITE_MAX_TICKETS_PER_RESERVATION: 5
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5173', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  backend:
+    build:
+      context: ./apps/worker
+      dockerfile: Dockerfile
+    ports:
+      - "8787:8787"
+    volumes:
+      - ./apps/worker:/app
+      - ./db:/app/db
+      - /app/node_modules
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    environment:
+      PORT: 8787
+      DATABASE_PATH: /app/db/tickets.db
+      MAILPIT_HOST: mailpit
+      MAILPIT_PORT: 1025
+      FRONTEND_URL: http://localhost:5173
+      JWT_SECRET: dev-secret
+      TOTAL_CAPACITY: 100
+      MAX_TICKETS_PER_RESERVATION: 5
+      TICKET_PRICE_CENTS: 1000
+      RESERVATION_TTL_HOURS: 48
+      ING_PAYMENT_LINK: https://www.ing.nl/payreq/m/?trxid=example-demo-link
+      MOCK_GOOGLE_LOGIN: 'true'
+      MOCK_GOOGLE_EMAIL: admin@example.com
+      ADMIN_ALLOWED_EMAILS: admin@example.com
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8787/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    depends_on:
+      - mailpit
+
+  mailpit:
+    image: axllent/mailpit:v1.14
+    ports:
+      - "1025:1025"
+      - "8025:8025"

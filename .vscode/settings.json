@@ -1,0 +1,7 @@
+{
+	"chat.tools.terminal.autoApprove": {
+		"npm run test:e2e": true,
+		"npm --prefix apps/frontend run build": true,
+    "PROJECT_ROOT=/Users/dorien.meijercluwen/git/hpn-ticket-service npm --prefix apps/worker test && npm --prefix apps/frontend run build && npm run test:e2e": true
+	}
+}
