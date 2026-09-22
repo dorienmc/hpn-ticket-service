@@ -6,6 +6,17 @@ This project is a small ticket reservation MVP for Half Past Nine. It runs local
 - a SQLite database
 - Mailpit for email capture in development
 
+## Requirements
+
+The project expects the following toolchain versions:
+
+- Node.js 24.x
+- npm 10.x or newer
+- Docker Desktop / Docker Engine with Compose support
+- Git for repository operations
+
+This project is configured for Node 24 via the repository's `.nvmrc` file and the package `engines` fields.
+
 ## TODOs
 
 - [ ] Send mail after payment is confirmed?
