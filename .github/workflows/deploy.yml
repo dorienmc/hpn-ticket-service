@@ -38,7 +38,8 @@ jobs:
       - name: Build frontend
         working-directory: apps/frontend
         env:
-          VITE_RESERVATIONS_ENABLED: "false"
+          VITE_API_BASE_URL: ${{ vars.CLOUDFLARE_WORKER_URL }}
+          VITE_RESERVATIONS_ENABLED: ${{ vars.RESERVATIONS_ENABLED || 'false' }}
         run: npm run build -- --base ./
 
       - name: Upload frontend build

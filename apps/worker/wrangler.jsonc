@@ -5,7 +5,7 @@
   "compatibility_date": "2025-09-01",
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
-    "FRONTEND_URL": "https://example.github.io/hpn-ticket-service",
+    "FRONTEND_URL": "https://dorienmc.github.io/hpn-ticket-service",
     "TOTAL_CAPACITY": "100",
     "MAX_TICKETS_PER_RESERVATION": "5",
     "TICKET_PRICE_CENTS": "1000",
@@ -16,7 +16,7 @@
     {
       "binding": "DB",
       "database_name": "hpn-ticket-service-prod",
-      "database_id": "YOUR_D1_DATABASE_ID"
+      "database_id": "4c9e7d56-07dd-41ed-ab82-8d6abe14f806"
     }
   ],
   "observability": {
