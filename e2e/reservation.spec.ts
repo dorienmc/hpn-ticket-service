@@ -33,6 +33,12 @@ test('customer can create a reservation and view its private status page', async
   await expect(page.getByText('Betalen via ING', { exact: true })).toBeVisible();
   await expect(page.locator('.status-header .badge')).toHaveClass(/info/);
   await expect(page.locator('.ticket-list')).toHaveCount(0);
+
+  await expect.poll(async () => {
+    const response = await page.request.get('http://localhost:8025/api/v1/search?query=to:e2e-');
+    const mailbox = await response.json();
+    return mailbox.messages_count;
+  }).toBeGreaterThan(0);
 });
 
 test('customer status page reflects paid status and ticket check-in state', async ({ page, request }) => {

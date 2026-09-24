@@ -11,7 +11,57 @@ const appRoot = app;
 const baseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8787';
 const maxTickets = import.meta.env.VITE_MAX_TICKETS_PER_RESERVATION ?? '5';
 const reservationsEnabled = import.meta.env.VITE_RESERVATIONS_ENABLED !== 'false';
+const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY ?? '';
+const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '';
 const path = window.location.pathname;
+
+let recaptchaScriptPromise: Promise<void> | null = null;
+
+function loadRecaptcha(): Promise<void> {
+  if (!recaptchaSiteKey) return Promise.resolve();
+  if (window.grecaptcha) return Promise.resolve();
+  if (recaptchaScriptPromise) return recaptchaScriptPromise;
+
+  recaptchaScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = `https://www.google.com/recaptcha/api.js?render=${encodeURIComponent(recaptchaSiteKey)}`;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('reCAPTCHA kon niet worden geladen.'));
+    document.head.append(script);
+  });
+
+  return recaptchaScriptPromise;
+}
+
+async function getRecaptchaToken(): Promise<string | undefined> {
+  if (!recaptchaSiteKey) return undefined;
+
+  await loadRecaptcha();
+  return new Promise((resolve, reject) => {
+    window.grecaptcha.ready(() => {
+      window.grecaptcha.execute(recaptchaSiteKey, { action: 'reserve' }).then(resolve).catch(reject);
+    });
+  });
+}
+
+let googleScriptPromise: Promise<void> | null = null;
+
+function loadGoogleIdentityServices(): Promise<void> {
+  if (window.google?.accounts?.id) return Promise.resolve();
+  if (googleScriptPromise) return googleScriptPromise;
+
+  googleScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Google Sign-In kon niet worden geladen.'));
+    document.head.append(script);
+  });
+
+  return googleScriptPromise;
+}
 
 function statusLabel(status: string): string {
   return {
@@ -24,6 +74,15 @@ function statusLabel(status: string): string {
   }[status] ?? status;
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 async function initApp() {
   if (path.startsWith('/admin')) {
     appRoot.innerHTML = `
@@ -34,7 +93,17 @@ async function initApp() {
           <div id="admin-summary" class="summary-grid"></div>
           <div id="admin-login" class="payment-box muted-box" hidden>
             <p>Log in om reserveringen te beheren.</p>
-            <a class="primary-link" href="${baseUrl}/api/auth/google">Inloggen met Google</a>
+            <a id="admin-google-mock-link" class="primary-link" href="${baseUrl}/api/auth/google">Inloggen met Google</a>
+            <div id="google-signin-button"></div>
+            <p id="admin-google-error" class="error-message" aria-live="polite"></p>
+            <form id="admin-password-form" class="form">
+              <label>
+                Beheerderswachtwoord
+                <input id="admin-password" name="password" type="password" autocomplete="current-password" required />
+              </label>
+              <button type="submit">Inloggen met wachtwoord</button>
+            </form>
+            <p id="admin-password-error" class="error-message" aria-live="polite"></p>
           </div>
           <div id="admin-content" hidden>
             <div class="admin-toolbar">
@@ -77,6 +146,63 @@ async function initApp() {
 
       if (!session.authenticated) {
         if (loginContainer) loginContainer.hidden = false;
+
+        if (googleClientId) {
+          const googleMockLink = document.querySelector<HTMLAnchorElement>('#admin-google-mock-link');
+          if (googleMockLink) googleMockLink.hidden = true;
+
+          const googleError = document.querySelector<HTMLParagraphElement>('#admin-google-error');
+          const googleButtonContainer = document.querySelector<HTMLDivElement>('#google-signin-button');
+          try {
+            await loadGoogleIdentityServices();
+            window.google?.accounts.id.initialize({
+              client_id: googleClientId,
+              callback: async (credentialResponse) => {
+                const response = await fetch(`${baseUrl}/api/auth/google`, {
+                  method: 'POST',
+                  credentials: 'include',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ credential: credentialResponse.credential }),
+                });
+
+                if (!response.ok) {
+                  if (googleError) googleError.textContent = 'Inloggen met Google is mislukt.';
+                  return;
+                }
+
+                window.location.reload();
+              },
+            });
+            if (googleButtonContainer) {
+              window.google?.accounts.id.renderButton(googleButtonContainer, { theme: 'outline', size: 'large' });
+            }
+          } catch (error) {
+            if (googleError) googleError.textContent = error instanceof Error ? error.message : 'Google Sign-In kon niet worden geladen.';
+          }
+        }
+
+        const passwordForm = document.querySelector<HTMLFormElement>('#admin-password-form');
+        const passwordError = document.querySelector<HTMLParagraphElement>('#admin-password-error');
+        passwordForm?.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const formData = new FormData(passwordForm);
+          const password = String(formData.get('password') ?? '');
+
+          const response = await fetch(`${baseUrl}/api/auth/password`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password }),
+          });
+
+          if (!response.ok) {
+            if (passwordError) passwordError.textContent = 'Ongeldig wachtwoord.';
+            return;
+          }
+
+          window.location.reload();
+        });
+
         return;
       }
 
@@ -90,7 +216,12 @@ async function initApp() {
       const logoutButton = document.querySelector<HTMLButtonElement>('#admin-logout');
       logoutButton?.addEventListener('click', async () => {
         logoutButton.disabled = true;
-        await fetch(`${baseUrl}/api/auth/logout`, { method: 'POST', credentials: 'include' });
+        const response = await fetch(`${baseUrl}/api/auth/logout`, { method: 'POST', credentials: 'include' });
+        const payload = response.status === 204 ? null : await response.json();
+        if (payload?.logoutUrl) {
+          window.location.href = payload.logoutUrl;
+          return;
+        }
         window.location.reload();
       });
 
@@ -163,9 +294,9 @@ async function initApp() {
               <tbody>
                 ${filteredOrders.map((order: any) => `
                   <tr>
-                    <td>${order.order_number}</td>
-                    <td>${order.name}</td>
-                    <td>${order.email}</td>
+                    <td>${escapeHtml(order.order_number)}</td>
+                    <td>${escapeHtml(order.name)}</td>
+                    <td>${escapeHtml(order.email)}</td>
                     <td>${order.quantity}</td>
                     <td>${statusLabel(order.status)}</td>
                     <td>€${(order.amount_cents / 100).toFixed(2)}</td>
@@ -226,7 +357,7 @@ async function initApp() {
               <ul class="ticket-modal-list">
                 ${tickets.map((ticket: any) => `
                   <li>
-                    <span>${ticket.ticket_code}</span>
+                    <span>${escapeHtml(ticket.ticket_code)}</span>
                     <span class="ticket-status${ticket.status === 'USED' ? ' used' : ''}">${statusLabel(ticket.status)}</span>
                     <button class="admin-button secondary" data-modal-action="checkin-one" data-ticket="${ticket.ticket_code}" ${ticket.status === 'USED' ? 'disabled' : ''}><span aria-hidden="true">🎫</span> Inchecken</button>
                   </li>
@@ -426,9 +557,9 @@ async function initApp() {
             ${statusMarkup}
           </div>
           <dl class="detail-list">
-            <div><dt>Ordernummer</dt><dd>${payload.orderNumber}</dd></div>
-              <div><dt>Naam</dt><dd>${payload.name}</dd></div>
-              <div><dt>E-mail</dt><dd>${payload.email}</dd></div>
+            <div><dt>Ordernummer</dt><dd>${escapeHtml(payload.orderNumber)}</dd></div>
+              <div><dt>Naam</dt><dd>${escapeHtml(payload.name)}</dd></div>
+              <div><dt>E-mail</dt><dd>${escapeHtml(payload.email)}</dd></div>
               <div><dt>Tickets</dt><dd>${payload.quantity}</dd></div>
               <div><dt>Bedrag</dt><dd>€${amount}</dd></div>
               <div><dt>Verloopt op</dt><dd>${expiresAt}</dd></div>
@@ -499,10 +630,11 @@ async function initApp() {
     status!.textContent = 'Je reservering wordt aangemaakt...';
 
     try {
+      const recaptchaToken = await getRecaptchaToken();
       const response = await fetch(`${baseUrl}/api/reservations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, quantity })
+        body: JSON.stringify({ name, email, quantity, recaptchaToken })
       });
 
       const payload = await response.json();

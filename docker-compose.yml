@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   frontend:
     build:
@@ -32,24 +30,22 @@ services:
       - "8787:8787"
     volumes:
       - ./apps/worker:/app
-      - ./db:/app/db
       - /app/node_modules
-    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+      - wrangler-data:/app/.wrangler
+    command: >-
+      sh -c "npm ci &&
+      npm run db:migrate:local &&
+      npm run dev:cloudflare --
+      --ip 0.0.0.0
+      --port 8787
+      --var FRONTEND_URL:http://localhost:5173
+      --var EMAIL_DELIVERY:mailpit
+      --var MAILPIT_API_URL:http://mailpit:8025
+      --var LOCAL_ADMIN_AUTH:true
+      --var ING_PAYMENT_LINK:https://www.ing.nl/payreq/m/?trxid=example-demo-link"
     environment:
-      PORT: 8787
-      DATABASE_PATH: /app/db/tickets.db
-      MAILPIT_HOST: mailpit
-      MAILPIT_PORT: 1025
-      FRONTEND_URL: http://localhost:5173
-      JWT_SECRET: dev-secret
-      TOTAL_CAPACITY: 100
-      MAX_TICKETS_PER_RESERVATION: 5
-      TICKET_PRICE_CENTS: 1000
-      RESERVATION_TTL_HOURS: 48
-      ING_PAYMENT_LINK: https://www.ing.nl/payreq/m/?trxid=example-demo-link
-      MOCK_GOOGLE_LOGIN: 'true'
-      MOCK_GOOGLE_EMAIL: admin@example.com
-      ADMIN_ALLOWED_EMAILS: admin@example.com
+      CI: 'true'
+      WRANGLER_SEND_METRICS: 'false'
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:8787/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 5s
@@ -60,7 +56,10 @@ services:
       - mailpit
 
   mailpit:
-    image: axllent/mailpit:v1.14
+    image: axllent/mailpit:v1.27
     ports:
       - "1025:1025"
       - "8025:8025"
+
+volumes:
+  wrangler-data:
