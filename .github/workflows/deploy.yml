@@ -62,6 +62,10 @@ jobs:
           VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
         run: npm run build -- --base ./
 
+      - name: Configure SPA fallback
+        working-directory: apps/frontend
+        run: cp dist/index.html dist/404.html
+
       - name: Upload frontend build
         uses: actions/upload-pages-artifact@v3
         with:

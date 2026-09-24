@@ -14,6 +14,7 @@ const reservationsEnabled = import.meta.env.VITE_RESERVATIONS_ENABLED !== 'false
 const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY ?? '';
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '';
 const path = window.location.pathname;
+const isAdminPath = path.replace(/\/+$/, '').endsWith('/admin');
 
 let recaptchaScriptPromise: Promise<void> | null = null;
 
@@ -84,7 +85,7 @@ function escapeHtml(value: string): string {
 }
 
 async function initApp() {
-  if (path.startsWith('/admin')) {
+  if (isAdminPath) {
     appRoot.innerHTML = `
       <main class="page page--admin">
         <section class="card reservation-card">
@@ -480,10 +481,10 @@ async function initApp() {
     return;
   }
 
-  if (path.startsWith('/payment/')) {
+  if (path.includes('/payment/')) {
     const segments = path.split('/').filter(Boolean);
-    const orderNumber = segments[1];
-    const token = segments[2];
+    const orderNumber = segments.at(-2);
+    const token = segments.at(-1);
 
     appRoot.innerHTML = `
       <main class="page">

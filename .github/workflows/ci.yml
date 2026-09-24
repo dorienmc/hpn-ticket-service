@@ -56,9 +56,18 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
       - run: npx playwright install --with-deps chromium
 
       - name: Start application stack
+        env:
+          COMPOSE_BAKE: 'true'
         run: docker compose up --build -d --wait --wait-timeout 120
 
       - name: Run Playwright tests
