@@ -60,10 +60,30 @@ For production, set these values through the deployment environment rather than 
 
 Production deployment is split into two phases:
 
-1. **GitHub Pages:** `.github/workflows/deploy.yml` builds and publishes the static frontend. This production build sets `VITE_RESERVATIONS_ENABLED=false`, so the reservation button is visible but disabled until the API is available.
-2. **Cloudflare:** deploy the backend as a Cloudflare Worker, migrate persistence to D1, configure Resend and Cloudflare Access, and then set `VITE_RESERVATIONS_ENABLED=true` together with the production `VITE_API_BASE_URL`.
+1. **GitHub Pages:** `.github/workflows/deploy.yml` builds and publishes the static frontend. Reservations remain disabled while the `RESERVATIONS_ENABLED` repository variable is unset or `false`.
+2. **Cloudflare:** the production API runs as a Cloudflare Worker with D1 and Cloudflare Access. Production email delivery is disabled until a sending provider is configured. `.github/workflows/deploy-cloudflare.yml` performs the D1 schema setup and Worker deployment manually.
 
 Local development keeps reservations enabled by default.
+
+### Cloudflare setup
+
+1. Authenticate Wrangler locally and create the production database:
+
+	```bash
+	cd apps/worker
+	npx wrangler login
+	npx wrangler d1 create hpn-ticket-service-prod
+	```
+
+2. Copy the returned database ID into `apps/worker/wrangler.jsonc`. Also replace `FRONTEND_URL` with the real GitHub Pages URL.
+
+3. Store runtime secrets directly in Cloudflare. Do not commit their values:
+
+	```bash
+	npx wrangler secret put ING_PAYMENT_LINK
+	```
+
+Email delivery can be enabled later by setting `EMAIL_DELIVERY` to `gmail` or `resend` and adding the matching provider secrets. Until then, reservations are created without sending customer email.
 
 ## Testing the reservation flow
 

@@ -9,7 +9,11 @@ type Bindings = {
   ING_PAYMENT_LINK: string;
   RESEND_API_KEY: string;
   RESEND_FROM_EMAIL: string;
-  EMAIL_DELIVERY?: 'resend' | 'mailpit' | 'disabled';
+  EMAIL_DELIVERY?: 'resend' | 'gmail' | 'mailpit' | 'disabled';
+  GMAIL_CLIENT_ID?: string;
+  GMAIL_CLIENT_SECRET?: string;
+  GMAIL_REFRESH_TOKEN?: string;
+  GMAIL_FROM_EMAIL?: string;
   MAILPIT_API_URL?: string;
   LOCAL_ADMIN_AUTH?: string;
   TOTAL_CAPACITY?: string;
@@ -50,6 +54,19 @@ function ticketCode(): string {
 
 function addHours(date: Date, hours: number): string {
   return new Date(date.getTime() + hours * 60 * 60 * 1000).toISOString();
+}
+
+function sanitizeHeader(value: string): string {
+  return value.replace(/[\r\n]+/g, ' ').trim();
+}
+
+function base64UrlEncode(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
 async function expireReservations(db: D1Database): Promise<void> {
@@ -95,6 +112,41 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
       }),
     });
     if (!response.ok) throw new Error(`Mailpit rejected the email (${response.status})`);
+    return;
+  }
+
+  if (env.EMAIL_DELIVERY === 'gmail') {
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: env.GMAIL_CLIENT_ID ?? '',
+        client_secret: env.GMAIL_CLIENT_SECRET ?? '',
+        refresh_token: env.GMAIL_REFRESH_TOKEN ?? '',
+        grant_type: 'refresh_token',
+      }),
+    });
+    const tokenPayload = await tokenResponse.json<{ access_token?: string; error_description?: string }>();
+    if (!tokenResponse.ok || !tokenPayload.access_token) {
+      throw new Error(tokenPayload.error_description || `Gmail token request failed (${tokenResponse.status})`);
+    }
+
+    const mime = [
+      'MIME-Version: 1.0',
+      `From: ${sanitizeHeader(env.GMAIL_FROM_EMAIL ?? '')}`,
+      `To: ${sanitizeHeader(reservation.email)}`,
+      `Subject: ${sanitizeHeader(subject)}`,
+      'Content-Type: text/html; charset=UTF-8',
+      '',
+      html,
+    ].join('\r\n');
+
+    const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tokenPayload.access_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ raw: base64UrlEncode(mime) }),
+    });
+    if (!response.ok) throw new Error(`Gmail rejected the email (${response.status})`);
     return;
   }
 
@@ -307,5 +359,5 @@ app.post('/api/admin/tickets/:ticketCode/use', async (context) => {
   return context.json({ ticketCode: result.ticket_code, status: result.status, usedAt: result.used_at });
 });
 
-export { app };
+export { app, base64UrlEncode, sendReservationEmail };
 export default app;
