@@ -74,6 +74,15 @@ function statusLabel(status: string): string {
   }[status] ?? status;
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 async function initApp() {
   if (path.startsWith('/admin')) {
     appRoot.innerHTML = `
@@ -285,9 +294,9 @@ async function initApp() {
               <tbody>
                 ${filteredOrders.map((order: any) => `
                   <tr>
-                    <td>${order.order_number}</td>
-                    <td>${order.name}</td>
-                    <td>${order.email}</td>
+                    <td>${escapeHtml(order.order_number)}</td>
+                    <td>${escapeHtml(order.name)}</td>
+                    <td>${escapeHtml(order.email)}</td>
                     <td>${order.quantity}</td>
                     <td>${statusLabel(order.status)}</td>
                     <td>€${(order.amount_cents / 100).toFixed(2)}</td>
@@ -348,7 +357,7 @@ async function initApp() {
               <ul class="ticket-modal-list">
                 ${tickets.map((ticket: any) => `
                   <li>
-                    <span>${ticket.ticket_code}</span>
+                    <span>${escapeHtml(ticket.ticket_code)}</span>
                     <span class="ticket-status${ticket.status === 'USED' ? ' used' : ''}">${statusLabel(ticket.status)}</span>
                     <button class="admin-button secondary" data-modal-action="checkin-one" data-ticket="${ticket.ticket_code}" ${ticket.status === 'USED' ? 'disabled' : ''}><span aria-hidden="true">🎫</span> Inchecken</button>
                   </li>
@@ -548,9 +557,9 @@ async function initApp() {
             ${statusMarkup}
           </div>
           <dl class="detail-list">
-            <div><dt>Ordernummer</dt><dd>${payload.orderNumber}</dd></div>
-              <div><dt>Naam</dt><dd>${payload.name}</dd></div>
-              <div><dt>E-mail</dt><dd>${payload.email}</dd></div>
+            <div><dt>Ordernummer</dt><dd>${escapeHtml(payload.orderNumber)}</dd></div>
+              <div><dt>Naam</dt><dd>${escapeHtml(payload.name)}</dd></div>
+              <div><dt>E-mail</dt><dd>${escapeHtml(payload.email)}</dd></div>
               <div><dt>Tickets</dt><dd>${payload.quantity}</dd></div>
               <div><dt>Bedrag</dt><dd>€${amount}</dd></div>
               <div><dt>Verloopt op</dt><dd>${expiresAt}</dd></div>

@@ -20,6 +20,51 @@ const reservation = {
   notes: null,
 } as const;
 
+function createReservationDb() {
+  function createPreparedResult(statement: string, args: unknown[]) {
+    return {
+      async run() {
+        return { meta: { changes: 1 } };
+      },
+      async first<T>() {
+        if (statement.includes('SELECT COALESCE(SUM(quantity), 0) AS active_quantity')) {
+          return { active_quantity: 0 } as T;
+        }
+        if (statement.includes('INSERT INTO orders')) {
+          const [orderNumber, accessToken, name, email, quantity, amountCents, createdAt, expiresAt] = args;
+          return {
+            ...reservation,
+            id: 99,
+            order_number: orderNumber,
+            access_token: accessToken,
+            name,
+            email,
+            quantity,
+            amount_cents: amountCents,
+            created_at: createdAt,
+            expires_at: expiresAt,
+          } as T;
+        }
+        return null as T;
+      },
+      async all<T>() {
+        return { results: [] as T[] };
+      },
+    };
+  }
+
+  return {
+    prepare(statement: string) {
+      return {
+        ...createPreparedResult(statement, []),
+        bind(...args: unknown[]) {
+          return createPreparedResult(statement, args);
+        },
+      };
+    },
+  } as never;
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -32,30 +77,34 @@ describe('Cloudflare Worker shell', () => {
     await expect(response.json()).resolves.toEqual({ ok: true, status: 'healthy' });
   });
 
-  it('requires Cloudflare Access for admin routes', async () => {
+  it('requires an authenticated admin session for admin routes', async () => {
     const response = await app.request('/api/admin/orders', {}, env);
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({ error: 'Admin authentication required' });
   });
 
-  it('recognizes the Cloudflare Access session cookie', async () => {
+  it('does not trust Cloudflare Access headers or cookies on the public worker origin', async () => {
     const response = await app.request('/api/auth/session', {
-      headers: { Cookie: 'CF_Authorization=test-token' },
-    }, env);
+      headers: {
+        Cookie: 'CF_Authorization=test-token',
+        'Cf-Access-Authenticated-User-Email': 'admin@example.com',
+      },
+    }, {
+      FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
+      ADMIN_PASSWORD: 'super-secret',
+    } as never);
 
     await expect(response.json()).resolves.toEqual({
-      authenticated: true,
-      provider: 'cloudflare-access',
+      authenticated: false,
+      provider: 'password',
     });
   });
 
-  it('returns the Cloudflare Access logout URL', async () => {
+  it('returns a local logout response without a Cloudflare Access redirect', async () => {
     const response = await app.request('https://api.example.com/api/auth/logout', { method: 'POST' }, env);
 
-    await expect(response.json()).resolves.toEqual({
-      logoutUrl: 'https://api.example.com/cdn-cgi/access/logout',
-    });
+    expect(response.status).toBe(204);
   });
 
   it('rejects password login when ADMIN_PASSWORD is not configured', async () => {
@@ -85,6 +134,7 @@ describe('Cloudflare Worker shell', () => {
     const passwordEnv = {
       FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
       ADMIN_PASSWORD: 'super-secret',
+      DB: createReservationDb(),
     } as never;
 
     const loginResponse = await app.request('/api/auth/password', {
@@ -96,6 +146,8 @@ describe('Cloudflare Worker shell', () => {
     expect(loginResponse.status).toBe(200);
     const setCookie = loginResponse.headers.get('set-cookie');
     expect(setCookie).toBeTruthy();
+    expect(setCookie).toContain('SameSite=None');
+    expect(setCookie).toContain('Secure');
     const cookie = setCookie!.split(';')[0];
 
     const sessionResponse = await app.request('/api/auth/session', { headers: { Cookie: cookie } }, passwordEnv);
@@ -146,6 +198,7 @@ describe('Cloudflare Worker shell', () => {
       GOOGLE_CLIENT_ID: 'expected-client-id',
       ADMIN_ALLOWED_EMAILS: 'admin@example.com',
       ADMIN_PASSWORD: 'super-secret',
+      DB: createReservationDb(),
     } as never;
 
     const loginResponse = await app.request('/api/auth/google', {
@@ -216,8 +269,12 @@ describe('Cloudflare Worker shell', () => {
     expect(payload.raw).toEqual(expect.any(String));
   });
 
-  it('skips reCAPTCHA verification when no secret is configured', async () => {
-    await expect(verifyRecaptcha({} as never, undefined)).resolves.toBe(true);
+  it('requires a reCAPTCHA secret outside local development', async () => {
+    await expect(verifyRecaptcha({} as never, undefined)).resolves.toBe(false);
+  });
+
+  it('allows local reservations without a reCAPTCHA secret', async () => {
+    await expect(verifyRecaptcha({ LOCAL_ADMIN_AUTH: 'true' } as never, undefined)).resolves.toBe(true);
   });
 
   it('verifies reCAPTCHA tokens with Google when a secret is configured', async () => {
@@ -237,5 +294,55 @@ describe('Cloudflare Worker shell', () => {
 
   it('rejects missing reCAPTCHA tokens when a secret is configured', async () => {
     await expect(verifyRecaptcha({ RECAPTCHA_SECRET_KEY: 'secret' } as never, undefined)).resolves.toBe(false);
+  });
+
+  it('uses the frontend origin for API CORS responses', async () => {
+    const response = await app.request('/api/health', {
+      headers: { Origin: 'https://example.github.io' },
+    }, env);
+
+    expect(response.headers.get('access-control-allow-origin')).toBe('https://example.github.io');
+  });
+
+  it('escapes untrusted reservation names in HTML email output', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(null, { status: 202 }));
+
+    await sendReservationEmail({
+      FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
+      EMAIL_DELIVERY: 'mailpit',
+      MAILPIT_API_URL: 'http://mailpit:8025',
+    } as never, {
+      ...reservation,
+      name: '<img src=x onerror=alert(1)>',
+    });
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const payload = JSON.parse(String(request.body));
+    expect(payload.HTML).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    expect(payload.HTML).not.toContain('<img src=x onerror=alert(1)>');
+  });
+
+  it('keeps a created reservation when email delivery fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(null, { status: 500 }));
+
+    const response = await app.request('/api/reservations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Test Customer', email: 'customer@example.com', quantity: 2 }),
+    }, {
+      FRONTEND_URL: 'http://localhost:5173',
+      LOCAL_ADMIN_AUTH: 'true',
+      EMAIL_DELIVERY: 'mailpit',
+      MAILPIT_API_URL: 'http://mailpit:8025',
+      DB: createReservationDb(),
+    } as never);
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({
+      status: 'RESERVED',
+      paymentUrl: expect.stringContaining('/payment/'),
+    }));
+    expect(consoleError).toHaveBeenCalled();
   });
 });

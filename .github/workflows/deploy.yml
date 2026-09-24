@@ -44,6 +44,15 @@ jobs:
         working-directory: apps/frontend
         run: npm ci
 
+      - name: Validate reservation configuration
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.reservations_enabled == 'true' }}
+        env:
+          CLOUDFLARE_WORKER_URL: ${{ vars.CLOUDFLARE_WORKER_URL }}
+          RECAPTCHA_SITE_KEY: ${{ vars.RECAPTCHA_SITE_KEY }}
+        run: |
+          test -n "$CLOUDFLARE_WORKER_URL" || { echo "CLOUDFLARE_WORKER_URL must be set before enabling reservations."; exit 1; }
+          test -n "$RECAPTCHA_SITE_KEY" || { echo "RECAPTCHA_SITE_KEY must be set before enabling reservations."; exit 1; }
+
       - name: Build frontend
         working-directory: apps/frontend
         env:

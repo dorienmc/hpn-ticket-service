@@ -86,9 +86,9 @@ Local development keeps reservations enabled by default.
 
 Email delivery can be enabled later by setting `EMAIL_DELIVERY` to `gmail` or `resend` and adding the matching provider secrets. Until then, reservations are created without sending customer email.
 
-To protect the public reservation form, create a Google reCAPTCHA v3 key pair for the GitHub Pages domain and use the `reserve` action. Store the secret key in Cloudflare as `RECAPTCHA_SECRET_KEY`. Store the public site key as a GitHub Actions repository variable named `RECAPTCHA_SITE_KEY` so the Pages build can pass it to the frontend as `VITE_RECAPTCHA_SITE_KEY`.
+To protect the public reservation form, create a Google reCAPTCHA v3 key pair for the GitHub Pages domain and use the `reserve` action. Store the secret key in Cloudflare as `RECAPTCHA_SECRET_KEY`. Store the public site key as a GitHub Actions repository variable named `RECAPTCHA_SITE_KEY` so the Pages build can pass it to the frontend as `VITE_RECAPTCHA_SITE_KEY`. Outside local development, the Worker now rejects public reservations until `RECAPTCHA_SECRET_KEY` is configured, and the Pages deploy workflow refuses to enable reservations unless the frontend reCAPTCHA configuration is present.
 
-4. Protect the admin area. Cloudflare Access requires a domain managed in your Cloudflare account; if the Worker is only reachable through its `workers.dev` URL (as with `hpn-ticket-service-worker.dorienmc.workers.dev`), Access cannot protect it, so use one or both of these instead:
+4. Protect the admin area. Cloudflare Access can still be used as an outer network gate on a custom domain, but the Worker itself only trusts its own signed admin sessions. If the Worker is only reachable through its `workers.dev` URL (as with `hpn-ticket-service-worker.dorienmc.workers.dev`), Access cannot protect it, so use one or both of these instead:
 
 **Password fallback:**
 

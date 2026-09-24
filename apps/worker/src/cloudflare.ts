@@ -32,9 +32,14 @@ const passwordSessionCookieName = 'hpn_admin_password_session';
 const googleSessionCookieName = 'hpn_admin_google_session';
 const adminSessionTtlSeconds = 60 * 60 * 12;
 
-function hasAccessSession(headers: Headers): boolean {
-  if (headers.get('Cf-Access-Authenticated-User-Email')) return true;
-  return /(?:^|;\s*)CF_Authorization=/.test(headers.get('Cookie') ?? '');
+function frontendOrigin(env: Bindings): string {
+  return new URL(env.FRONTEND_URL).origin;
+}
+
+function adminSessionCookieAttributes(env: Bindings): string {
+  return new URL(env.FRONTEND_URL).protocol === 'https:'
+    ? 'Path=/; HttpOnly; SameSite=None; Secure'
+    : 'Path=/; HttpOnly; SameSite=Lax';
 }
 
 function hasLocalAdminSession(env: Bindings, headers: Headers): boolean {
@@ -55,7 +60,7 @@ async function signSessionValue(secret: string, message: string): Promise<string
 async function createAdminSessionCookie(env: Bindings): Promise<string> {
   const expiresAt = Math.floor(Date.now() / 1000) + adminSessionTtlSeconds;
   const signature = await signSessionValue(env.ADMIN_PASSWORD ?? '', String(expiresAt));
-  return `${passwordSessionCookieName}=${expiresAt}.${signature}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${adminSessionTtlSeconds}`;
+  return `${passwordSessionCookieName}=${expiresAt}.${signature}; ${adminSessionCookieAttributes(env)}; Max-Age=${adminSessionTtlSeconds}`;
 }
 
 async function hasPasswordAdminSession(env: Bindings, headers: Headers): Promise<boolean> {
@@ -84,7 +89,7 @@ async function createGoogleSessionCookie(env: Bindings, email: string): Promise<
   const expiresAt = Math.floor(Date.now() / 1000) + adminSessionTtlSeconds;
   const encodedEmail = base64UrlEncode(email);
   const signature = await signSessionValue(env.ADMIN_PASSWORD ?? '', `${expiresAt}.${encodedEmail}`);
-  return `${googleSessionCookieName}=${expiresAt}.${encodedEmail}.${signature}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${adminSessionTtlSeconds}`;
+  return `${googleSessionCookieName}=${expiresAt}.${encodedEmail}.${signature}; ${adminSessionCookieAttributes(env)}; Max-Age=${adminSessionTtlSeconds}`;
 }
 
 async function hasGoogleAdminSession(env: Bindings, headers: Headers): Promise<boolean> {
@@ -153,6 +158,15 @@ function sanitizeHeader(value: string): string {
   return value.replace(/[\r\n]+/g, ' ').trim();
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function base64UrlEncode(value: string): string {
   const bytes = new TextEncoder().encode(value);
   let binary = '';
@@ -177,7 +191,7 @@ async function availableCapacity(env: Bindings): Promise<number> {
 }
 
 async function verifyRecaptcha(env: Bindings, token: string | undefined, remoteIp?: string): Promise<boolean> {
-  if (!env.RECAPTCHA_SECRET_KEY) return true;
+  if (!env.RECAPTCHA_SECRET_KEY) return env.LOCAL_ADMIN_AUTH === 'true';
   if (!token) return false;
 
   const body = new URLSearchParams({
@@ -210,7 +224,7 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
   const paymentUrl = `${env.FRONTEND_URL}/payment/${reservation.order_number}/${reservation.access_token}`;
   const amountEuros = (reservation.amount_cents / 100).toFixed(2);
   const subject = `Je reservering voor Half Past Nine (${reservation.order_number})`;
-  const html = `<h2>Bedankt, ${reservation.name}!</h2><p>Je reservering voor ${reservation.quantity} ticket(s) is aangemaakt.</p><p><strong>Ordernummer:</strong> ${reservation.order_number}</p><p><strong>Bedrag:</strong> €${amountEuros}</p><p><a href="${paymentUrl}">Open je reserveringspagina</a></p>`;
+  const html = `<h2>Bedankt, ${escapeHtml(reservation.name)}!</h2><p>Je reservering voor ${reservation.quantity} ticket(s) is aangemaakt.</p><p><strong>Ordernummer:</strong> ${reservation.order_number}</p><p><strong>Bedrag:</strong> €${amountEuros}</p><p><a href="${escapeHtml(paymentUrl)}">Open je reserveringspagina</a></p>`;
 
   if (env.EMAIL_DELIVERY === 'mailpit') {
     const response = await fetch(`${env.MAILPIT_API_URL ?? 'http://mailpit:8025'}/api/v1/send`, {
@@ -276,15 +290,14 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
 }
 
 app.use('/api/*', async (context, next) => cors({
-  origin: context.env.FRONTEND_URL,
+  origin: frontendOrigin(context.env),
   allowMethods: ['GET', 'POST', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Cf-Access-Authenticated-User-Email'],
+  allowHeaders: ['Content-Type'],
   credentials: true,
 })(context, next));
 
 app.use('/api/admin/*', async (context, next) => {
-  const authenticated = Boolean(context.req.header('Cf-Access-Authenticated-User-Email'))
-    || hasLocalAdminSession(context.env, context.req.raw.headers)
+  const authenticated = hasLocalAdminSession(context.env, context.req.raw.headers)
     || await hasPasswordAdminSession(context.env, context.req.raw.headers)
     || await hasGoogleAdminSession(context.env, context.req.raw.headers);
   if (!authenticated) {
@@ -297,19 +310,16 @@ app.get('/api/health', (context) => context.json({ ok: true, status: 'healthy' }
 app.get('/api/auth/session', async (context) => {
   const headers = context.req.raw.headers;
   const localSession = hasLocalAdminSession(context.env, headers);
-  const accessSession = hasAccessSession(headers);
   const passwordSession = await hasPasswordAdminSession(context.env, headers);
   const googleSession = await hasGoogleAdminSession(context.env, headers);
 
   return context.json({
-    authenticated: localSession || accessSession || passwordSession || googleSession,
+    authenticated: localSession || passwordSession || googleSession,
     provider: localSession
       ? 'local'
-      : accessSession
-        ? 'cloudflare-access'
-        : googleSession
-          ? 'google'
-          : (passwordSession || context.env.ADMIN_PASSWORD) ? 'password' : 'cloudflare-access',
+      : googleSession
+        ? 'google'
+        : (passwordSession || context.env.ADMIN_PASSWORD) ? 'password' : 'google',
   });
 });
 app.get('/api/auth/google', (context) => {
@@ -358,11 +368,11 @@ app.post('/api/auth/logout', (context) => {
     return context.body(null, 204);
   }
   if (context.env.ADMIN_PASSWORD || context.env.GOOGLE_CLIENT_ID) {
-    context.header('Set-Cookie', `${passwordSessionCookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
-    context.header('Set-Cookie', `${googleSessionCookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`, { append: true });
+    context.header('Set-Cookie', `${passwordSessionCookieName}=; ${adminSessionCookieAttributes(context.env)}; Max-Age=0`);
+    context.header('Set-Cookie', `${googleSessionCookieName}=; ${adminSessionCookieAttributes(context.env)}; Max-Age=0`, { append: true });
     return context.body(null, 204);
   }
-  return context.json({ logoutUrl: `${new URL(context.req.url).origin}/cdn-cgi/access/logout` });
+  return context.body(null, 204);
 });
 
 app.get('/api/capacity', async (context) => {
@@ -412,7 +422,11 @@ app.post('/api/reservations', async (context) => {
       .first<ReservationRecord>();
     if (!reservation) throw new Error('Reservation could not be stored');
 
-    await sendReservationEmail(context.env, reservation);
+    try {
+      await sendReservationEmail(context.env, reservation);
+    } catch (error) {
+      console.error('Reservation email delivery failed', error);
+    }
     return context.json({
       orderNumber: reservation.order_number,
       status: reservation.status,
