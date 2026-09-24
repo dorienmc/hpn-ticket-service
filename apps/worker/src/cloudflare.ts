@@ -323,7 +323,7 @@ app.post('/api/auth/google', async (context) => {
     return context.json({ error: 'Google sign-in is not configured' }, 404);
   }
   if (!context.env.ADMIN_PASSWORD) {
-    return context.json({ error: 'Admin session signing secret is not configured' }, 500);
+    return context.json({ error: 'Admin password is not configured' }, 500);
   }
 
   const body = await context.req.json<{ credential?: string }>();

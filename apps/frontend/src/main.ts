@@ -84,7 +84,7 @@ async function initApp() {
           <div id="admin-summary" class="summary-grid"></div>
           <div id="admin-login" class="payment-box muted-box" hidden>
             <p>Log in om reserveringen te beheren.</p>
-            <a class="primary-link" href="${baseUrl}/api/auth/google">Inloggen met Google</a>
+            <a id="admin-google-mock-link" class="primary-link" href="${baseUrl}/api/auth/google">Inloggen met Google</a>
             <div id="google-signin-button"></div>
             <p id="admin-google-error" class="error-message" aria-live="polite"></p>
             <form id="admin-password-form" class="form">
@@ -139,6 +139,9 @@ async function initApp() {
         if (loginContainer) loginContainer.hidden = false;
 
         if (googleClientId) {
+          const googleMockLink = document.querySelector<HTMLAnchorElement>('#admin-google-mock-link');
+          if (googleMockLink) googleMockLink.hidden = true;
+
           const googleError = document.querySelector<HTMLParagraphElement>('#admin-google-error');
           const googleButtonContainer = document.querySelector<HTMLDivElement>('#google-signin-button');
           try {
