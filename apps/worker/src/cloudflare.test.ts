@@ -292,6 +292,16 @@ describe('Cloudflare Worker shell', () => {
     }));
   });
 
+  it('rejects reCAPTCHA responses without the reserve action and numeric score', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+      success: true,
+      action: 'homepage',
+      score: '0.9',
+    })));
+
+    await expect(verifyRecaptcha({ RECAPTCHA_SECRET_KEY: 'secret' } as never, 'token')).resolves.toBe(false);
+  });
+
   it('rejects missing reCAPTCHA tokens when a secret is configured', async () => {
     await expect(verifyRecaptcha({ RECAPTCHA_SECRET_KEY: 'secret' } as never, undefined)).resolves.toBe(false);
   });
@@ -302,6 +312,32 @@ describe('Cloudflare Worker shell', () => {
     }, env);
 
     expect(response.headers.get('access-control-allow-origin')).toBe('https://example.github.io');
+  });
+
+  it('rejects cross-site admin mutations even with a valid admin session', async () => {
+    const passwordEnv = {
+      FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
+      ADMIN_PASSWORD: 'super-secret',
+      DB: createReservationDb(),
+    } as never;
+
+    const loginResponse = await app.request('/api/auth/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: 'super-secret' }),
+    }, passwordEnv);
+    const cookie = loginResponse.headers.get('set-cookie')!.split(';')[0];
+
+    const response = await app.request('/api/admin/orders/HP9-1234-ABCD/cancel', {
+      method: 'POST',
+      headers: {
+        Cookie: cookie,
+        Origin: 'https://evil.example',
+      },
+    }, passwordEnv);
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: 'Cross-site admin requests are not allowed' });
   });
 
   it('escapes untrusted reservation names in HTML email output', async () => {

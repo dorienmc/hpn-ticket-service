@@ -42,6 +42,25 @@ function adminSessionCookieAttributes(env: Bindings): string {
     : 'Path=/; HttpOnly; SameSite=Lax';
 }
 
+function requestComesFromFrontend(headers: Headers, env: Bindings): boolean {
+  const expectedOrigin = frontendOrigin(env);
+
+  for (const headerName of ['Origin', 'Referer']) {
+    const value = headers.get(headerName);
+    if (!value) continue;
+
+    try {
+      if (new URL(value).origin === expectedOrigin) {
+        return true;
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
+
 function hasLocalAdminSession(env: Bindings, headers: Headers): boolean {
   return env.LOCAL_ADMIN_AUTH === 'true' && (headers.get('Cookie') ?? '').split(';')
     .some((cookie) => cookie.trim() === localAdminCookie);
@@ -206,7 +225,7 @@ async function verifyRecaptcha(env: Bindings, token: string | undefined, remoteI
     body,
   });
   const payload = await response.json<{ success?: boolean; action?: string; score?: number }>();
-  return Boolean(payload.success) && (!payload.action || payload.action === 'reserve') && (payload.score === undefined || payload.score >= 0.5);
+  return payload.success === true && payload.action === 'reserve' && typeof payload.score === 'number' && payload.score >= 0.5;
 }
 
 async function ticketsForOrder(db: D1Database, value: string): Promise<TicketRecord[]> {
@@ -302,6 +321,10 @@ app.use('/api/admin/*', async (context, next) => {
     || await hasGoogleAdminSession(context.env, context.req.raw.headers);
   if (!authenticated) {
     return context.json({ error: 'Admin authentication required' }, 401);
+  }
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(context.req.raw.method)
+    && !requestComesFromFrontend(context.req.raw.headers, context.env)) {
+    return context.json({ error: 'Cross-site admin requests are not allowed' }, 403);
   }
   await next();
 });

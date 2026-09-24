@@ -4,5 +4,6 @@
     "noEmit": true,
     "types": ["@cloudflare/workers-types", "vitest/globals"]
   },
-  "include": ["src/cloudflare.ts", "src/cloudflare.test.ts", "src/types.ts"]
+  "include": ["src/cloudflare.ts", "src/cloudflare.test.ts", "src/types.ts"],
+  "exclude": []
 }
