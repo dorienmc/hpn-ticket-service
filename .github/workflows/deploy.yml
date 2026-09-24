@@ -4,6 +4,15 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      reservations_enabled:
+        description: Enable the public ticket reservation button
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 concurrency:
   group: pages
@@ -39,8 +48,9 @@ jobs:
         working-directory: apps/frontend
         env:
           VITE_API_BASE_URL: ${{ vars.CLOUDFLARE_WORKER_URL }}
-          VITE_RESERVATIONS_ENABLED: ${{ vars.RESERVATIONS_ENABLED || 'false' }}
+          VITE_RESERVATIONS_ENABLED: ${{ github.event_name == 'workflow_dispatch' && inputs.reservations_enabled || 'false' }}
           VITE_RECAPTCHA_SITE_KEY: ${{ vars.RECAPTCHA_SITE_KEY }}
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
         run: npm run build -- --base ./
 
       - name: Upload frontend build

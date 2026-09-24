@@ -44,7 +44,7 @@ The backend runs the same Worker entrypoint used in production. Wrangler provide
 
 Mailpit remains useful because its HTTP Send API is compatible with the Worker runtime. Local Worker email requests go to Mailpit over HTTP; production requests use Resend's HTTP API. Resend itself is a hosted email service and does not run as a local Compose container.
 
-The backend settings can be configured with environment variables:
+The backend settings can be configured with environment variables. `TOTAL_CAPACITY`, `MAX_TICKETS_PER_RESERVATION`, `TICKET_PRICE_CENTS`, and `RESERVATION_TTL_HOURS` come from the `vars` block in `apps/worker/wrangler.jsonc` (Wrangler loads the same file locally and in production); `FRONTEND_URL`, `EMAIL_DELIVERY`, `MAILPIT_API_URL`, `LOCAL_ADMIN_AUTH`, and `ING_PAYMENT_LINK` are passed as `--var` flags from `docker-compose.yml` for local development:
 
 | Variable | Local default | Purpose |
 | --- | ---: | --- |
@@ -54,7 +54,7 @@ The backend settings can be configured with environment variables:
 | `RESERVATION_TTL_HOURS` | `48` | Reservation lifetime before expiry |
 | `ING_PAYMENT_LINK` | Demo URL | Payment link shown on the private page |
 
-For production, set these values through the deployment environment rather than committing real payment links to Compose.
+For production, set these values through `apps/worker/wrangler.jsonc` vars or Cloudflare Worker secrets rather than committing real payment links to Compose.
 
 ## Production rollout
 
@@ -87,6 +87,46 @@ Local development keeps reservations enabled by default.
 Email delivery can be enabled later by setting `EMAIL_DELIVERY` to `gmail` or `resend` and adding the matching provider secrets. Until then, reservations are created without sending customer email.
 
 To protect the public reservation form, create a Google reCAPTCHA v3 key pair for the GitHub Pages domain and use the `reserve` action. Store the secret key in Cloudflare as `RECAPTCHA_SECRET_KEY`. Store the public site key as a GitHub Actions repository variable named `RECAPTCHA_SITE_KEY` so the Pages build can pass it to the frontend as `VITE_RECAPTCHA_SITE_KEY`.
+
+4. Protect the admin area. Cloudflare Access requires a domain managed in your Cloudflare account; if the Worker is only reachable through its `workers.dev` URL (as with `hpn-ticket-service-worker.dorienmc.workers.dev`), Access cannot protect it, so use one or both of these instead:
+
+**Password fallback:**
+
+	```bash
+	npx wrangler secret put ADMIN_PASSWORD
+	```
+
+When `ADMIN_PASSWORD` is set, the admin login page also accepts that password and issues a signed session cookie, independent of Cloudflare Access.
+
+**Google Sign-In with an email allowlist:**
+
+- In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create an OAuth client of type **Web application**.
+- Under **Authorized JavaScript origins**, add the GitHub Pages origin, e.g. `https://dorienmc.github.io`. No redirect URI is needed for this flow.
+- Copy the client ID and store it as a Cloudflare Worker secret:
+
+	```bash
+	npx wrangler secret put GOOGLE_CLIENT_ID
+	```
+
+- Manage the allowlist directly in `apps/worker/wrangler.jsonc` as the committed `ADMIN_ALLOWED_EMAILS` var, a comma-separated list of Gmail addresses allowed to sign in as admin, e.g. `"organiser@example.com, backup@example.com"`. Leave it empty to allow any Google account with a verified email. Redeploy the Worker after changing it.
+
+- The Worker signs Google session cookies with `ADMIN_PASSWORD`, so it must be set (see the password fallback above) even if you don't intend to use password login yourself.
+
+- Add the same client ID as a GitHub Pages variable (`GOOGLE_CLIENT_ID`, see step 6 below) so the frontend can render the Google Sign-In button.
+
+1. Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as GitHub Actions secrets. Run the **Deploy Cloudflare Worker** workflow manually. It validates the bundle, applies the D1 schema, and deploys the Worker.
+
+	`db:migrate:remote` runs `wrangler d1 execute --remote --file migrations/0001_initial.sql` directly rather than `wrangler d1 migrations apply --remote`, because the latter currently fails with Cloudflare API error `7403` on this account. The schema statements use `IF NOT EXISTS`, so rerunning it is safe. If you add a new migration file, update this script (or switch back to `wrangler d1 migrations apply` if Cloudflare resolves the issue) so it gets applied too.
+
+2. Verify the deployed `/api/health` endpoint. Then add these GitHub Actions repository variables:
+
+	| Variable | Value |
+	| --- | --- |
+	| `CLOUDFLARE_WORKER_URL` | Worker origin, without a trailing slash |
+	| `RECAPTCHA_SITE_KEY` | Public Google reCAPTCHA v3 site key |
+	| `GOOGLE_CLIENT_ID` | Google OAuth client ID, passed to the frontend as `VITE_GOOGLE_CLIENT_ID` |
+
+Rerun **Deploy GitHub Pages** manually and choose `reservations_enabled=true` to enable the public reservation button. Push-triggered Pages deploys keep reservations blocked by default.
 
 ## Testing the reservation flow
 
@@ -172,4 +212,4 @@ docker compose logs -f
 
 - The local flow is intentionally simple and operational rather than a strict lock-based capacity system.
 - The project is designed so that payment and status live behind a private URL rather than embedding raw banking details in emails.
-- Production design extends this with Cloudflare/D1 + Resend patterns, but the Docker Compose setup is the quickest way to test the MVP locally.
+- Both local development and production run the same Cloudflare Worker (via Wrangler) and Cloudflare D1 database; the only difference is the local D1 database and Mailpit stand in for the remote D1 database and the configured production email provider (Gmail API or Resend).

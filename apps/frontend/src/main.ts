@@ -12,6 +12,7 @@ const baseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8787';
 const maxTickets = import.meta.env.VITE_MAX_TICKETS_PER_RESERVATION ?? '5';
 const reservationsEnabled = import.meta.env.VITE_RESERVATIONS_ENABLED !== 'false';
 const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY ?? '';
+const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '';
 const path = window.location.pathname;
 
 let recaptchaScriptPromise: Promise<void> | null = null;
@@ -44,6 +45,24 @@ async function getRecaptchaToken(): Promise<string | undefined> {
   });
 }
 
+let googleScriptPromise: Promise<void> | null = null;
+
+function loadGoogleIdentityServices(): Promise<void> {
+  if (window.google?.accounts?.id) return Promise.resolve();
+  if (googleScriptPromise) return googleScriptPromise;
+
+  googleScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Google Sign-In kon niet worden geladen.'));
+    document.head.append(script);
+  });
+
+  return googleScriptPromise;
+}
+
 function statusLabel(status: string): string {
   return {
     RESERVED: 'Gereserveerd',
@@ -66,6 +85,16 @@ async function initApp() {
           <div id="admin-login" class="payment-box muted-box" hidden>
             <p>Log in om reserveringen te beheren.</p>
             <a class="primary-link" href="${baseUrl}/api/auth/google">Inloggen met Google</a>
+            <div id="google-signin-button"></div>
+            <p id="admin-google-error" class="error-message" aria-live="polite"></p>
+            <form id="admin-password-form" class="form">
+              <label>
+                Beheerderswachtwoord
+                <input id="admin-password" name="password" type="password" autocomplete="current-password" required />
+              </label>
+              <button type="submit">Inloggen met wachtwoord</button>
+            </form>
+            <p id="admin-password-error" class="error-message" aria-live="polite"></p>
           </div>
           <div id="admin-content" hidden>
             <div class="admin-toolbar">
@@ -108,6 +137,60 @@ async function initApp() {
 
       if (!session.authenticated) {
         if (loginContainer) loginContainer.hidden = false;
+
+        if (googleClientId) {
+          const googleError = document.querySelector<HTMLParagraphElement>('#admin-google-error');
+          const googleButtonContainer = document.querySelector<HTMLDivElement>('#google-signin-button');
+          try {
+            await loadGoogleIdentityServices();
+            window.google?.accounts.id.initialize({
+              client_id: googleClientId,
+              callback: async (credentialResponse) => {
+                const response = await fetch(`${baseUrl}/api/auth/google`, {
+                  method: 'POST',
+                  credentials: 'include',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ credential: credentialResponse.credential }),
+                });
+
+                if (!response.ok) {
+                  if (googleError) googleError.textContent = 'Inloggen met Google is mislukt.';
+                  return;
+                }
+
+                window.location.reload();
+              },
+            });
+            if (googleButtonContainer) {
+              window.google?.accounts.id.renderButton(googleButtonContainer, { theme: 'outline', size: 'large' });
+            }
+          } catch (error) {
+            if (googleError) googleError.textContent = error instanceof Error ? error.message : 'Google Sign-In kon niet worden geladen.';
+          }
+        }
+
+        const passwordForm = document.querySelector<HTMLFormElement>('#admin-password-form');
+        const passwordError = document.querySelector<HTMLParagraphElement>('#admin-password-error');
+        passwordForm?.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const formData = new FormData(passwordForm);
+          const password = String(formData.get('password') ?? '');
+
+          const response = await fetch(`${baseUrl}/api/auth/password`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password }),
+          });
+
+          if (!response.ok) {
+            if (passwordError) passwordError.textContent = 'Ongeldig wachtwoord.';
+            return;
+          }
+
+          window.location.reload();
+        });
+
         return;
       }
 
