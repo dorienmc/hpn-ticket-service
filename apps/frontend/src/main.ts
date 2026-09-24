@@ -11,7 +11,38 @@ const appRoot = app;
 const baseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8787';
 const maxTickets = import.meta.env.VITE_MAX_TICKETS_PER_RESERVATION ?? '5';
 const reservationsEnabled = import.meta.env.VITE_RESERVATIONS_ENABLED !== 'false';
+const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY ?? '';
 const path = window.location.pathname;
+
+let recaptchaScriptPromise: Promise<void> | null = null;
+
+function loadRecaptcha(): Promise<void> {
+  if (!recaptchaSiteKey) return Promise.resolve();
+  if (window.grecaptcha) return Promise.resolve();
+  if (recaptchaScriptPromise) return recaptchaScriptPromise;
+
+  recaptchaScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = `https://www.google.com/recaptcha/api.js?render=${encodeURIComponent(recaptchaSiteKey)}`;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('reCAPTCHA kon niet worden geladen.'));
+    document.head.append(script);
+  });
+
+  return recaptchaScriptPromise;
+}
+
+async function getRecaptchaToken(): Promise<string | undefined> {
+  if (!recaptchaSiteKey) return undefined;
+
+  await loadRecaptcha();
+  return new Promise((resolve, reject) => {
+    window.grecaptcha.ready(() => {
+      window.grecaptcha.execute(recaptchaSiteKey, { action: 'reserve' }).then(resolve).catch(reject);
+    });
+  });
+}
 
 function statusLabel(status: string): string {
   return {
@@ -504,10 +535,11 @@ async function initApp() {
     status!.textContent = 'Je reservering wordt aangemaakt...';
 
     try {
+      const recaptchaToken = await getRecaptchaToken();
       const response = await fetch(`${baseUrl}/api/reservations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, quantity })
+        body: JSON.stringify({ name, email, quantity, recaptchaToken })
       });
 
       const payload = await response.json();

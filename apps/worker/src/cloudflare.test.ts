@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { app, base64UrlEncode, sendReservationEmail } from './cloudflare.js';
+import { app, base64UrlEncode, sendReservationEmail, verifyRecaptcha } from './cloudflare.js';
 
 const env = {
   FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
@@ -93,5 +93,28 @@ describe('Cloudflare Worker shell', () => {
     const sendRequest = fetchMock.mock.calls[1]?.[1] as RequestInit;
     const payload = JSON.parse(String(sendRequest.body));
     expect(payload.raw).toEqual(expect.any(String));
+  });
+
+  it('skips reCAPTCHA verification when no secret is configured', async () => {
+    await expect(verifyRecaptcha({} as never, undefined)).resolves.toBe(true);
+  });
+
+  it('verifies reCAPTCHA tokens with Google when a secret is configured', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+      success: true,
+      action: 'reserve',
+      score: 0.9,
+    })));
+
+    await expect(verifyRecaptcha({ RECAPTCHA_SECRET_KEY: 'secret' } as never, 'token', '127.0.0.1')).resolves.toBe(true);
+
+    expect(fetchMock).toHaveBeenCalledWith('https://www.google.com/recaptcha/api/siteverify', expect.objectContaining({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    }));
+  });
+
+  it('rejects missing reCAPTCHA tokens when a secret is configured', async () => {
+    await expect(verifyRecaptcha({ RECAPTCHA_SECRET_KEY: 'secret' } as never, undefined)).resolves.toBe(false);
   });
 });

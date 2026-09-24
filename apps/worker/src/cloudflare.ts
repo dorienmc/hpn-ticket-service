@@ -16,6 +16,7 @@ type Bindings = {
   GMAIL_FROM_EMAIL?: string;
   MAILPIT_API_URL?: string;
   LOCAL_ADMIN_AUTH?: string;
+  RECAPTCHA_SECRET_KEY?: string;
   TOTAL_CAPACITY?: string;
   MAX_TICKETS_PER_RESERVATION?: string;
   TICKET_PRICE_CENTS?: string;
@@ -81,6 +82,25 @@ async function availableCapacity(env: Bindings): Promise<number> {
     WHERE status = 'PAID' OR (status = 'RESERVED' AND expires_at > ?)
   `).bind(new Date().toISOString()).first<{ active_quantity: number }>();
   return numberFromEnv(env.TOTAL_CAPACITY, 100) - Number(result?.active_quantity ?? 0);
+}
+
+async function verifyRecaptcha(env: Bindings, token: string | undefined, remoteIp?: string): Promise<boolean> {
+  if (!env.RECAPTCHA_SECRET_KEY) return true;
+  if (!token) return false;
+
+  const body = new URLSearchParams({
+    secret: env.RECAPTCHA_SECRET_KEY,
+    response: token,
+  });
+  if (remoteIp) body.set('remoteip', remoteIp);
+
+  const response = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+  const payload = await response.json<{ success?: boolean; action?: string; score?: number }>();
+  return Boolean(payload.success) && (!payload.action || payload.action === 'reserve') && (payload.score === undefined || payload.score >= 0.5);
 }
 
 async function ticketsForOrder(db: D1Database, value: string): Promise<TicketRecord[]> {
@@ -206,13 +226,18 @@ app.get('/api/capacity', async (context) => {
 
 app.post('/api/reservations', async (context) => {
   try {
-    const body = await context.req.json<{ name?: string; email?: string; quantity?: number }>();
+    const body = await context.req.json<{ name?: string; email?: string; quantity?: number; recaptchaToken?: string }>();
     const name = body.name?.trim() ?? '';
     const email = body.email?.trim().toLowerCase() ?? '';
     const quantity = Number(body.quantity);
     const maximum = numberFromEnv(context.env.MAX_TICKETS_PER_RESERVATION, 5);
     if (!name || !email || !Number.isInteger(quantity) || quantity < 1 || quantity > maximum) {
       return context.json({ error: `Quantity must be between 1 and ${maximum}` }, 400);
+    }
+
+    const recaptchaValid = await verifyRecaptcha(context.env, body.recaptchaToken, context.req.header('CF-Connecting-IP'));
+    if (!recaptchaValid) {
+      return context.json({ error: 'reCAPTCHA validation failed' }, 400);
     }
 
     await expireReservations(context.env.DB);
@@ -359,5 +384,5 @@ app.post('/api/admin/tickets/:ticketCode/use', async (context) => {
   return context.json({ ticketCode: result.ticket_code, status: result.status, usedAt: result.used_at });
 });
 
-export { app, base64UrlEncode, sendReservationEmail };
+export { app, base64UrlEncode, sendReservationEmail, verifyRecaptcha };
 export default app;

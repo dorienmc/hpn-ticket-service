@@ -81,9 +81,12 @@ Local development keeps reservations enabled by default.
 
 	```bash
 	npx wrangler secret put ING_PAYMENT_LINK
+	npx wrangler secret put RECAPTCHA_SECRET_KEY
 	```
 
 Email delivery can be enabled later by setting `EMAIL_DELIVERY` to `gmail` or `resend` and adding the matching provider secrets. Until then, reservations are created without sending customer email.
+
+To protect the public reservation form, create a Google reCAPTCHA v3 key pair for the GitHub Pages domain and use the `reserve` action. Store the secret key in Cloudflare as `RECAPTCHA_SECRET_KEY`. Store the public site key as a GitHub Actions repository variable named `RECAPTCHA_SITE_KEY` so the Pages build can pass it to the frontend as `VITE_RECAPTCHA_SITE_KEY`.
 
 ## Testing the reservation flow
 
