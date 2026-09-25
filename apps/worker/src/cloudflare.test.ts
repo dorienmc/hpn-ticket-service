@@ -48,6 +48,9 @@ function createReservationDb() {
         return null as T;
       },
       async all<T>() {
+        if (statement.includes('SELECT * FROM orders ORDER BY created_at DESC')) {
+          return { results: [reservation] as T[] };
+        }
         return { results: [] as T[] };
       },
     };
@@ -82,6 +85,63 @@ describe('Cloudflare Worker shell', () => {
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({ error: 'Admin authentication required' });
+  });
+
+  it('reports admin summary statistics as ticket quantities', async () => {
+    const db = {
+      prepare(statement: string) {
+        const result = {
+          async run() {
+            return { meta: { changes: 0 } };
+          },
+          async first<T>() {
+            if (statement.includes('SELECT COALESCE(SUM(quantity), 0) AS active_quantity')) {
+              return { active_quantity: 5 } as T;
+            }
+            return null as T;
+          },
+          async all<T>() {
+            if (statement.includes('COALESCE(SUM(quantity), 0) AS quantity')) {
+              return {
+                results: [
+                  { status: 'RESERVED', quantity: 3 },
+                  { status: 'PAID', quantity: 2 },
+                  { status: 'EXPIRED', quantity: 4 },
+                  { status: 'CANCELLED', quantity: 1 },
+                ] as T[],
+              };
+            }
+            return { results: [] as T[] };
+          },
+        };
+        return {
+          ...result,
+          bind() {
+            return result;
+          },
+        };
+      },
+    } as never;
+
+    const response = await app.request('/api/admin/summary', {
+      headers: { Cookie: 'hpn_local_admin=authenticated' },
+    }, {
+      FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
+      LOCAL_ADMIN_AUTH: 'true',
+      TOTAL_CAPACITY: '20',
+      DB: db,
+    } as never);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      total: 10,
+      totalCapacity: 20,
+      reserved: 3,
+      paid: 2,
+      available: 15,
+      expired: 4,
+      cancelled: 1,
+    });
   });
 
   it('does not trust Cloudflare Access headers or cookies on the public worker origin', async () => {
@@ -154,7 +214,13 @@ describe('Cloudflare Worker shell', () => {
     await expect(sessionResponse.json()).resolves.toEqual({ authenticated: true, provider: 'password' });
 
     const adminResponse = await app.request('/api/admin/orders', { headers: { Cookie: cookie } }, passwordEnv);
-    expect(adminResponse.status).not.toBe(401);
+    expect(adminResponse.status).toBe(200);
+    await expect(adminResponse.json()).resolves.toEqual({
+      orders: [expect.objectContaining({
+        order_number: reservation.order_number,
+        paymentUrl: `https://example.github.io/hpn-ticket-service/payment/${reservation.order_number}/${reservation.access_token}`,
+      })],
+    });
   });
 
   it('rejects a Google credential with the wrong audience', async () => {

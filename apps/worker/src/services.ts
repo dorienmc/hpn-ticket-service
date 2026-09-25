@@ -211,10 +211,10 @@ export function listOrders(): ReservationRecord[] {
 export function getReservationStatusSummary() {
   const db = getDb();
   const rows = db.prepare(`
-    SELECT status, COUNT(*) AS count
+    SELECT status, COALESCE(SUM(quantity), 0) AS quantity
     FROM orders
     GROUP BY status
-  `).all() as Array<{ status: ReservationStatus; count: number }>;
+  `).all() as Array<{ status: ReservationStatus; quantity: number }>;
 
   const summary: Record<string, number> = {
     total: 0,
@@ -227,11 +227,11 @@ export function getReservationStatusSummary() {
   };
 
   for (const row of rows) {
-    summary.total += row.count;
-    if (row.status === 'RESERVED') summary.reserved = row.count;
-    if (row.status === 'PAID') summary.paid = row.count;
-    if (row.status === 'EXPIRED') summary.expired = row.count;
-    if (row.status === 'CANCELLED') summary.cancelled = row.count;
+    summary.total += row.quantity;
+    if (row.status === 'RESERVED') summary.reserved = row.quantity;
+    if (row.status === 'PAID') summary.paid = row.quantity;
+    if (row.status === 'EXPIRED') summary.expired = row.quantity;
+    if (row.status === 'CANCELLED') summary.cancelled = row.quantity;
   }
 
   return summary;
