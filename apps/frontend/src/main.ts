@@ -483,8 +483,8 @@ async function initApp() {
 
   if (path.includes('/payment/')) {
     const segments = path.split('/').filter(Boolean);
-    const orderNumber = segments.at(-2);
-    const token = segments.at(-1);
+    const orderNumber = segments[segments.length - 2];
+    const token = segments[segments.length - 1];
 
     appRoot.innerHTML = `
       <main class="page">

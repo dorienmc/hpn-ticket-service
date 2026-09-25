@@ -36,7 +36,7 @@ docker compose up --build
 
 This starts:
 
-- frontend: http://localhost:5173
+- frontend: http://localhost:5173/hpn-ticket-service/
 - backend API: http://localhost:8787
 - Mailpit UI: http://localhost:8025
 
@@ -132,7 +132,7 @@ Rerun **Deploy GitHub Pages** manually and choose `reservations_enabled=true` to
 
 ### 1. Open the frontend
 
-Visit http://localhost:5173 and fill in the reservation form:
+Visit http://localhost:5173/hpn-ticket-service/ and fill in the reservation form:
 
 - full name
 - email address
@@ -152,7 +152,7 @@ The email contains a private link that is not the raw ING payment URL. The link 
 Example shape:
 
 ```text
-http://localhost:5173/payment/HPN-123456/abc123token
+http://localhost:5173/hpn-ticket-service/payment/HPN-123456/abc123token
 ```
 
 ### 3. Open the private reservation page
@@ -174,8 +174,16 @@ This acts as the private payment + status page without exposing the raw banking 
 Open the admin page here:
 
 ```text
-http://localhost:5173/admin
+http://localhost:5173/hpn-ticket-service/admin
 ```
+
+The local default already uses the GitHub Pages-style `/hpn-ticket-service/` prefix in frontend, admin, and payment URLs. If you intentionally want root-based links instead, override the frontend URL when starting Compose:
+
+```sh
+FRONTEND_URL=http://localhost:5173 docker compose up
+```
+
+Then use `http://localhost:5173/`, including the root-based admin and payment URLs.
 
 From there you can:
 

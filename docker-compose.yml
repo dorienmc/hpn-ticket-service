@@ -13,7 +13,7 @@ services:
       VITE_API_BASE_URL: http://localhost:8787
       VITE_MAX_TICKETS_PER_RESERVATION: 5
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5173', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5173/hpn-ticket-service/', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -37,7 +37,7 @@ services:
       npm run dev:cloudflare --
       --ip 0.0.0.0
       --port 8787
-      --var FRONTEND_URL:http://localhost:5173
+      --var FRONTEND_URL:${FRONTEND_URL:-http://localhost:5173/hpn-ticket-service}
       --var EMAIL_DELIVERY:mailpit
       --var MAILPIT_API_URL:http://mailpit:8025
       --var LOCAL_ADMIN_AUTH:true

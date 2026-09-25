@@ -47,7 +47,7 @@ concert-tickets/
 
 ### Acceptance criteria
 - `docker compose up` starts the stack successfully
-- frontend is accessible at `http://localhost:5173`
+- frontend is accessible at `http://localhost:5173/hpn-ticket-service/`
 - backend is accessible at `http://localhost:8787`
 - Mailpit is accessible at `http://localhost:8025`
 - SQLite DB is created and available to the backend
@@ -117,7 +117,7 @@ Body:
   "orderNumber": "HP9-0001",
   "status": "RESERVED",
   "expiresAt": "2026-09-12T10:00:00Z",
-  "paymentUrl": "http://localhost:5173/payment/HP9-0001/abc123"
+  "paymentUrl": "http://localhost:5173/hpn-ticket-service/payment/HP9-0001/abc123"
 }
 ```
 
