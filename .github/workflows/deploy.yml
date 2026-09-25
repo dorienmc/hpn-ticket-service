@@ -60,7 +60,7 @@ jobs:
           VITE_RESERVATIONS_ENABLED: ${{ github.event_name == 'workflow_dispatch' && inputs.reservations_enabled || 'false' }}
           VITE_RECAPTCHA_SITE_KEY: ${{ vars.RECAPTCHA_SITE_KEY }}
           VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
-        run: npm run build -- --base ./
+        run: npm run build -- --base /hpn-ticket-service/
 
       - name: Configure SPA fallback
         working-directory: apps/frontend
