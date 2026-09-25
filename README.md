@@ -175,15 +175,15 @@ Open the admin page here:
 
 ```text
 http://localhost:5173/hpn-ticket-service/admin
+```
 
-The local default uses root-based URLs so the existing E2E flow works unchanged. To test the application under the GitHub Pages-style repository prefix, set the frontend URL when starting Compose:
+The local default already uses the GitHub Pages-style `/hpn-ticket-service/` prefix in frontend, admin, and payment URLs. If you intentionally want root-based links instead, override the frontend URL when starting Compose:
 
 ```sh
-FRONTEND_URL=http://localhost:5173/hpn-ticket-service docker compose up
+FRONTEND_URL=http://localhost:5173 docker compose up
 ```
 
-Then use `http://localhost:5173/hpn-ticket-service/`, including the prefix in admin and payment URLs.
-```
+Then use `http://localhost:5173/`, including the root-based admin and payment URLs.
 
 From there you can:
 
