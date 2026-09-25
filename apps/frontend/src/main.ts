@@ -117,9 +117,9 @@ async function initApp() {
               </label>
             </div>
             <div id="admin-tabs" class="admin-tabs">
-              <button class="tab-button" data-tab="RESERVED">Gereserveerd</button>
-              <button class="tab-button" data-tab="PAID">Betaald</button>
-              <button class="tab-button" data-tab="ARCHIVE">Verlopen / geannuleerd</button>
+              <a class="tab-button" data-tab="RESERVED" href="?tab=RESERVED">Gereserveerd</a>
+              <a class="tab-button" data-tab="PAID" href="?tab=PAID">Betaald</a>
+              <a class="tab-button" data-tab="ARCHIVE" href="?tab=ARCHIVE">Verlopen / geannuleerd</a>
             </div>
             <div id="admin-list" class="admin-list"></div>
           </div>
@@ -137,7 +137,6 @@ async function initApp() {
 
     const summaryContainer = document.querySelector('#admin-summary');
     const listContainer = document.querySelector('#admin-list');
-    const adminStatus = document.querySelector<HTMLParagraphElement>('#admin-status');
     const loginContainer = document.querySelector<HTMLDivElement>('#admin-login');
     const contentContainer = document.querySelector<HTMLDivElement>('#admin-content');
 
@@ -244,17 +243,15 @@ async function initApp() {
       const ordersData = await ordersResponse.json();
       const orders = ordersData.orders ?? [];
 
-      async function refreshOrders() {
-        const response = await fetch(`${baseUrl}/api/admin/orders`, { credentials: 'include' });
-        const data = await response.json();
-        orders.length = 0;
-        orders.push(...(data.orders ?? []));
-      }
-
       if (listContainer) {
         const searchInput = document.querySelector<HTMLInputElement>('#order-search');
-        const tabButtons = document.querySelectorAll<HTMLButtonElement>('#admin-tabs [data-tab]');
-        let activeTab: 'RESERVED' | 'PAID' | 'ARCHIVE' = 'RESERVED';
+        const tabButtons = document.querySelectorAll<HTMLAnchorElement>('#admin-tabs [data-tab]');
+        const validTabs = ['RESERVED', 'PAID', 'ARCHIVE'] as const;
+        type AdminTab = (typeof validTabs)[number];
+        const requestedTab = new URLSearchParams(window.location.search).get('tab');
+        let activeTab: AdminTab = validTabs.includes(requestedTab as AdminTab)
+          ? requestedTab as AdminTab
+          : 'RESERVED';
 
         const setActiveTab = (tab: typeof activeTab) => {
           activeTab = tab;
@@ -381,9 +378,7 @@ async function initApp() {
                   alert(error instanceof Error ? error.message : 'Ticket kon niet worden ingecheckt.');
                 }
               }
-              if (adminStatus) adminStatus.textContent = `Alle tickets van order ${order.order_number} zijn ingecheckt.`;
-              renderTicketModal(order);
-              renderOrders();
+              window.location.reload();
             });
 
             ticketModalBody.querySelectorAll<HTMLButtonElement>('[data-modal-action="checkin-one"]').forEach((button) => {
@@ -395,9 +390,7 @@ async function initApp() {
                   await checkinTicket(ticketCode);
                   const ticket = tickets.find((candidate: any) => candidate.ticket_code === ticketCode);
                   if (ticket) ticket.status = 'USED';
-                  if (adminStatus) adminStatus.textContent = `Ticket ${ticketCode} is ingecheckt.`;
-                  renderTicketModal(order);
-                  renderOrders();
+                  window.location.reload();
                 } catch (error) {
                   button.disabled = false;
                   alert(error instanceof Error ? error.message : 'Ticket kon niet worden ingecheckt.');
@@ -446,34 +439,14 @@ async function initApp() {
                 return;
               }
 
-              const message = action === 'pay'
-                ? `Order ${payload.orderNumber} is als betaald gemarkeerd.`
-                : action === 'extend'
-                  ? `Order ${payload.orderNumber} is met 24 uur verlengd.`
-                  : action === 'cancel'
-                    ? `Order ${payload.orderNumber} is geannuleerd.`
-                    : `De reserverings-e-mail is opnieuw verstuurd naar ${payload.email}.`;
-                    if (action === 'pay' || action === 'cancel') {
-                      await refreshOrders();
-                    } else {
-                      const order = orders.find((candidate: any) => candidate.order_number === orderNumber);
-                      if (order && action === 'extend') order.expires_at = payload.expiresAt;
-                    }
-                    if (adminStatus) adminStatus.textContent = message;
-                    renderOrders();
+              window.location.reload();
             });
           });
 
         };
 
         searchInput?.addEventListener('input', renderOrders);
-        tabButtons.forEach((tabButton) => {
-          tabButton.addEventListener('click', () => {
-            const tab = tabButton.dataset.tab as typeof activeTab | undefined;
-            if (tab) setActiveTab(tab);
-          });
-        });
-        setActiveTab('RESERVED');
+        setActiveTab(activeTab);
       }
     } catch (error) {
       if (listContainer) {
