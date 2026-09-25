@@ -512,6 +512,7 @@ app.get('/api/admin/orders', async (context) => {
   const result = await context.env.DB.prepare('SELECT * FROM orders ORDER BY created_at DESC').all<ReservationRecord>();
   const orders = await Promise.all(result.results.map(async (order: ReservationRecord) => ({
     ...order,
+    paymentUrl: frontendUrl(context.env, `payment/${order.order_number}/${order.access_token}`),
     tickets: await ticketsForOrder(context.env.DB, order.order_number),
   })));
   return context.json({ orders });

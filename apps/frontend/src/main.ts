@@ -302,6 +302,9 @@ async function initApp() {
                     <td>${statusLabel(order.status)}</td>
                     <td>€${(order.amount_cents / 100).toFixed(2)}</td>
                     <td>
+                      <div class="admin-actions">
+                        <a class="admin-link" href="${escapeHtml(order.paymentUrl)}" target="_blank" rel="noreferrer">Bekijk reservering</a>
+                      </div>
                       ${order.status === 'RESERVED'
                         ? `<div class="admin-actions">
                             <button class="admin-button" data-action="pay" data-order="${order.order_number}"><span aria-hidden="true">✅</span> Markeer als betaald</button>
