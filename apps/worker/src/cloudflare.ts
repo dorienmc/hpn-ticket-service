@@ -488,8 +488,8 @@ app.get('/api/reservations/:orderNumber/:token', async (context) => {
 
 app.get('/api/admin/summary', async (context) => {
   await expireReservations(context.env.DB);
-  const rows = await context.env.DB.prepare('SELECT status, COUNT(*) AS count FROM orders GROUP BY status')
-    .all<{ status: string; count: number }>();
+  const rows = await context.env.DB.prepare('SELECT status, COALESCE(SUM(quantity), 0) AS quantity FROM orders GROUP BY status')
+    .all<{ status: string; quantity: number }>();
   const summary: Record<string, number> = {
     total: 0,
     totalCapacity: numberFromEnv(context.env.TOTAL_CAPACITY, 100),
@@ -500,9 +500,9 @@ app.get('/api/admin/summary', async (context) => {
     cancelled: 0,
   };
   for (const row of rows.results) {
-    summary.total += row.count;
+    summary.total += Number(row.quantity);
     const key = row.status.toLowerCase();
-    if (key in summary) summary[key] = row.count;
+    if (key in summary) summary[key] = Number(row.quantity);
   }
   return context.json(summary);
 });
