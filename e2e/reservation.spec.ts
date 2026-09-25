@@ -6,11 +6,11 @@ function uniqueEmail(): string {
 
 async function loginAsMockGoogleAdmin(page: import('@playwright/test').Page): Promise<void> {
   await page.goto('http://localhost:8787/api/auth/google');
-  await expect(page).toHaveURL(/\/admin$/);
+  await expect(page).toHaveURL(/\/hpn-ticket-service\/admin\/?$/);
 }
 
 test('admin page requires Google login', async ({ page }) => {
-  await page.goto('/admin');
+  await page.goto('admin');
 
   await expect(page.getByRole('heading', { name: 'Overzicht reserveringen' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Inloggen met Google' })).toBeVisible();
@@ -19,7 +19,7 @@ test('admin page requires Google login', async ({ page }) => {
 });
 
 test('customer can create a reservation and view its private status page', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('');
 
   await page.getByLabel('Volledige naam').fill('E2E Customer');
   await page.getByLabel('E-mailadres').fill(uniqueEmail());
@@ -74,7 +74,7 @@ test('customer status page reflects paid status and ticket check-in state', asyn
   await expect(ticketItems.filter({ hasText: 'Geldig' })).toHaveCount(2);
   await expect(ticketItems.filter({ hasText: 'Ingecheckt' })).toHaveCount(0);
 
-  await page.goto('/admin');
+  await page.goto('admin');
   await page.locator('#admin-tabs').getByRole('button', { name: 'Betaald', exact: true }).click();
   const paidOrderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
   await paidOrderRow.getByRole('button', { name: 'Tickets inchecken' }).click();

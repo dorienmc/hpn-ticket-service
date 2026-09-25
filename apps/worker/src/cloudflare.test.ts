@@ -367,7 +367,7 @@ describe('Cloudflare Worker shell', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: 'Test Customer', email: 'customer@example.com', quantity: 2 }),
     }, {
-      FRONTEND_URL: 'http://localhost:5173',
+      FRONTEND_URL: 'http://localhost:5173/hpn-ticket-service',
       LOCAL_ADMIN_AUTH: 'true',
       EMAIL_DELIVERY: 'mailpit',
       MAILPIT_API_URL: 'http://mailpit:8025',
