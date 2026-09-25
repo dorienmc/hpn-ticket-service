@@ -5,10 +5,19 @@ import { cancelReservation, createReservation, expireReservations, extendReserva
 import { sendReservationEmail } from './email.js';
 
 const app = express();
+
+function frontendOrigin(): string {
+  return new URL(process.env.FRONTEND_URL || 'http://localhost:5173/hpn-ticket-service').origin;
+}
+
+function frontendUrl(path: string): string {
+  const frontendBaseUrl = process.env.FRONTEND_URL || 'http://localhost:5173/hpn-ticket-service';
+  return `${frontendBaseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
+}
 const port = Number(process.env.PORT || 8787);
 const mockAdminCookie = 'hpn_mock_google_admin=authenticated';
 
-app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173', credentials: true }));
+app.use(cors({ origin: frontendOrigin(), credentials: true }));
 app.use(express.json());
 
 function isAdminAuthenticated(req: Request): boolean {
@@ -37,7 +46,7 @@ app.get('/api/auth/google', (_req: Request, res: Response) => {
   }
 
   res.setHeader('Set-Cookie', `${mockAdminCookie}; Path=/; HttpOnly; SameSite=Lax`);
-  res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/admin`);
+  res.redirect(frontendUrl('admin'));
 });
 
 app.get('/api/auth/session', (req: Request, res: Response) => {
@@ -63,7 +72,7 @@ app.post('/api/reservations', async (req: Request, res: Response) => {
     const { name, email, quantity } = req.body ?? {};
 
     const reservation = createReservation({ name, email, quantity });
-    const paymentUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/payment/${reservation.order_number}/${reservation.access_token}`;
+    const paymentUrl = frontendUrl(`payment/${reservation.order_number}/${reservation.access_token}`);
 
     await sendReservationEmail({
       to: reservation.email,
@@ -173,7 +182,7 @@ app.post('/api/admin/orders/:orderNumber/resend', async (req: Request, res: Resp
     return;
   }
 
-  const paymentUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/payment/${reservation.order_number}/${reservation.access_token}`;
+  const paymentUrl = frontendUrl(`payment/${reservation.order_number}/${reservation.access_token}`);
   await sendReservationEmail({
     to: reservation.email,
     customerName: reservation.name,

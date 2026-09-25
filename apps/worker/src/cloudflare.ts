@@ -36,6 +36,10 @@ function frontendOrigin(env: Bindings): string {
   return new URL(env.FRONTEND_URL).origin;
 }
 
+function frontendUrl(env: Bindings, path: string): string {
+  return `${env.FRONTEND_URL.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
+}
+
 function adminSessionCookieAttributes(env: Bindings): string {
   return new URL(env.FRONTEND_URL).protocol === 'https:'
     ? 'Path=/; HttpOnly; SameSite=None; Secure'
@@ -240,7 +244,7 @@ async function ticketsForOrder(db: D1Database, value: string): Promise<TicketRec
 async function sendReservationEmail(env: Bindings, reservation: ReservationRecord): Promise<void> {
   if (env.EMAIL_DELIVERY === 'disabled') return;
 
-  const paymentUrl = `${env.FRONTEND_URL}/payment/${reservation.order_number}/${reservation.access_token}`;
+  const paymentUrl = frontendUrl(env, `payment/${reservation.order_number}/${reservation.access_token}`);
   const amountEuros = (reservation.amount_cents / 100).toFixed(2);
   const subject = `Je reservering voor Half Past Nine (${reservation.order_number})`;
   const html = `<h2>Bedankt, ${escapeHtml(reservation.name)}!</h2><p>Je reservering voor ${reservation.quantity} ticket(s) is aangemaakt.</p><p><strong>Ordernummer:</strong> ${reservation.order_number}</p><p><strong>Bedrag:</strong> €${amountEuros}</p><p><a href="${escapeHtml(paymentUrl)}">Open je reserveringspagina</a></p>`;
@@ -349,7 +353,7 @@ app.get('/api/auth/google', (context) => {
   if (context.env.LOCAL_ADMIN_AUTH === 'true') {
     context.header('Set-Cookie', `${localAdminCookie}; Path=/; HttpOnly; SameSite=Lax`);
   }
-  return context.redirect(`${context.env.FRONTEND_URL}/admin`);
+  return context.redirect(frontendUrl(context.env, 'admin'));
 });
 app.post('/api/auth/google', async (context) => {
   if (!context.env.GOOGLE_CLIENT_ID) {
@@ -454,7 +458,7 @@ app.post('/api/reservations', async (context) => {
       orderNumber: reservation.order_number,
       status: reservation.status,
       expiresAt: reservation.expires_at,
-      paymentUrl: `${context.env.FRONTEND_URL}/payment/${reservation.order_number}/${reservation.access_token}`,
+      paymentUrl: frontendUrl(context.env, `payment/${reservation.order_number}/${reservation.access_token}`),
       available: await availableCapacity(context.env),
     }, 201);
   } catch (error) {

@@ -37,7 +37,7 @@ services:
       npm run dev:cloudflare --
       --ip 0.0.0.0
       --port 8787
-      --var FRONTEND_URL:http://localhost:5173
+      --var FRONTEND_URL:http://localhost:5173/hpn-ticket-service
       --var EMAIL_DELIVERY:mailpit
       --var MAILPIT_API_URL:http://mailpit:8025
       --var LOCAL_ADMIN_AUTH:true
