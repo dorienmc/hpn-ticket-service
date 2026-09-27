@@ -40,6 +40,10 @@ jobs:
           cache: npm
           cache-dependency-path: apps/frontend/package-lock.json
 
+      - name: Read frontend URL from Wrangler config
+        id: frontend-url
+        run: node -e 'const { vars } = JSON.parse(require("node:fs").readFileSync("apps/worker/wrangler.jsonc", "utf8")); console.log(`value=${vars.FRONTEND_URL}`)' >> "$GITHUB_OUTPUT"
+
       - name: Install frontend dependencies
         working-directory: apps/frontend
         run: npm ci
@@ -57,10 +61,11 @@ jobs:
         working-directory: apps/frontend
         env:
           VITE_API_BASE_URL: ${{ vars.CLOUDFLARE_WORKER_URL }}
+          VITE_FRONTEND_URL: ${{ steps.frontend-url.outputs.value }}
           VITE_RESERVATIONS_ENABLED: ${{ github.event_name == 'workflow_dispatch' && inputs.reservations_enabled || 'false' }}
           VITE_RECAPTCHA_SITE_KEY: ${{ vars.RECAPTCHA_SITE_KEY }}
           VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
-        run: npm run build -- --base /hpn-ticket-service/
+        run: npm run build
 
       - name: Configure SPA fallback
         working-directory: apps/frontend
