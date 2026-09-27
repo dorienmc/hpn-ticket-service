@@ -433,6 +433,10 @@ describe('Cloudflare Worker shell', () => {
 
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     const payload = JSON.parse(String(request.body));
+    expect(payload.HTML).toContain('HALF PAST NINE');
+    expect(payload.HTML).toContain('background-color:#087b76');
+    expect(payload.HTML).toContain('Open je reserveringspagina');
+    expect(payload.HTML).toContain('href="https://example.github.io/hpn-ticket-service/payment/');
     expect(payload.HTML).toContain('&lt;img src=x onerror=alert(1)&gt;');
     expect(payload.HTML).not.toContain('<img src=x onerror=alert(1)>');
   });

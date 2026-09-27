@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Half Past Nine – Dubbelconcert</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+    <link
+        href="https://fonts.googleapis.com/css2?family=Anton&family=Caveat:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet"
+    >
+
+    <link rel="stylesheet" href="optie-1.css">
+</head>
+
+<body>
+
+<main class="flyer-page">
+
+    <!-- Decoratieve verfspatten -->
+    <div class="paint paint-1"></div>
+    <div class="paint paint-2"></div>
+    <div class="paint paint-3"></div>
+
+    <!-- HEADER -->
+    <header class="hero">
+
+        <div class="concert-title">
+            <span class="title-back">dubbel</span>
+            <span class="title-main">Concert</span>
+        </div>
+
+        <div class="subtitle">
+            Prijswinnaars van de Amusing A Cappella-competitie
+        </div>
+
+    </header>
+
+
+    <!-- FOTO'S -->
+    <section class="groups">
+
+        <div class="group-photo diva">
+            <div class="photo-frame">
+                <img
+                    src="images/divapower.jpg"
+                    alt="Vocalgroup DivaPower"
+                >
+            </div>
+
+            <div class="group-label">
+                <span>Vocalgroup</span>
+                DivaPower
+            </div>
+        </div>
+
+
+        <div class="group-photo hpn">
+            <div class="photo-frame">
+                <img
+                    src="images/halfpastnine.jpg"
+                    alt="Vocalgroup Half Past Nine"
+                >
+            </div>
+
+            <div class="group-label">
+                <span>Vocalgroup</span>
+                Half Past Nine
+            </div>
+        </div>
+
+    </section>
+
+
+    <!-- TICKETFORMULIER -->
+    <section class="ticket-paper">
+
+        <div class="event-info">
+
+            <div class="info-row">
+                <span class="icon">▣</span>
+
+                <div>
+                    <strong>ZONDAG 8 NOVEMBER 2026</strong>
+                </div>
+            </div>
+
+
+            <div class="info-row">
+                <span class="icon">◷</span>
+
+                <div>
+                    <strong>15:00 UUR</strong>
+                </div>
+            </div>
+
+
+            <div class="info-row">
+                <span class="icon">⌖</span>
+
+                <div>
+                    <strong>Twekkelerveld Lambertus</strong>
+                    <br>
+                    Buddestraat 1
+                    <br>
+                    7521 SB Enschede
+                </div>
+            </div>
+
+        </div>
+
+
+        <div class="order-heading">
+            KAARTEN BESTELLEN
+        </div>
+
+
+        <form class="ticket-form">
+
+            <div class="form-group">
+                <label for="name">Naam *</label>
+
+                <input
+                    type="text"
+                    id="name"
+                    name="name"
+                    placeholder="Vul je naam in"
+                    required
+                >
+            </div>
+
+
+            <div class="form-group">
+                <label for="email">E-mailadres *</label>
+
+                <input
+                    type="email"
+                    id="email"
+                    name="email"
+                    placeholder="Vul je e-mailadres in"
+                    required
+                >
+            </div>
+
+
+            <div class="form-group">
+                <label for="amount">Aantal kaarten *</label>
+
+                <div class="quantity">
+                    <button type="button" class="quantity-button">−</button>
+
+                    <input
+                        type="number"
+                        id="amount"
+                        name="amount"
+                        value="1"
+                        min="1"
+                        max="20"
+                    >
+
+                    <button type="button" class="quantity-button">+</button>
+                </div>
+            </div>
+
+
+            <div class="price">
+
+                <span>
+                    🎟 €10,- per kaart
+                </span>
+
+                <strong>
+                    Totaal: €10,-
+                </strong>
+
+            </div>
+
+
+            <button class="submit-button" type="submit">
+                BESTELLEN
+                <span>→</span>
+            </button>
+
+        </form>
+
+    </section>
+
+
+    <div class="handwritten">
+        Samen maken we muziek!
+        <br>
+        ♥
+    </div>
+
+</main>
+
+</body>
+</html>
