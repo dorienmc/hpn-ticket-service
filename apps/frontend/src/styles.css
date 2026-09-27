@@ -190,6 +190,12 @@ select {
   gap: 6px;
 }
 
+.admin-link {
+  color: #1d4ed8;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .admin-button.secondary {
   background: #e5e7eb;
   color: #111827;

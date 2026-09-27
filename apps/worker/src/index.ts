@@ -220,6 +220,7 @@ app.get('/api/admin/orders', (_req: Request, res: Response) => {
   res.json({
     orders: listOrders().map((order) => ({
       ...order,
+      paymentUrl: frontendUrl(`payment/${order.order_number}/${order.access_token}`),
       tickets: listTickets(order.order_number),
     })),
   });

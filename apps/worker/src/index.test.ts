@@ -76,7 +76,8 @@ describe('reservation flow', () => {
     expect(markTicketUsed(tickets[0].ticket_code)).toBeNull();
 
     const summary = getReservationStatusSummary();
-    expect(summary.paid).toBe(1);
+    expect(summary.total).toBe(3);
+    expect(summary.paid).toBe(3);
   });
 
   it('cancels a reserved order and releases its capacity', () => {

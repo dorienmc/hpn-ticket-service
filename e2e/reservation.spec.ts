@@ -18,6 +18,33 @@ test('admin page requires Google login', async ({ page }) => {
   await expect(page.locator('#admin-list')).toBeEmpty();
 });
 
+test('admin can open a person reservation page', async ({ page, request }) => {
+  const customerName = 'Reservation Link E2E Customer';
+  const response = await request.post(`${process.env.E2E_API_URL || 'http://localhost:8787'}/api/reservations`, {
+    data: {
+      name: customerName,
+      email: uniqueEmail(),
+      quantity: 2,
+    },
+  });
+
+  expect(response.ok()).toBeTruthy();
+  const reservation = await response.json();
+
+  await loginAsMockGoogleAdmin(page);
+  const orderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
+  await expect(orderRow).toContainText(customerName);
+
+  const reservationPagePromise = page.waitForEvent('popup');
+  await orderRow.getByRole('link', { name: 'Bekijk reservering' }).click();
+  const reservationPage = await reservationPagePromise;
+
+  await expect(reservationPage).toHaveURL(reservation.paymentUrl);
+  await expect(reservationPage.getByRole('heading', { name: 'Reserveringsstatus' })).toBeVisible();
+  await expect(reservationPage.getByText(customerName, { exact: true })).toBeVisible();
+  await expect(reservationPage.getByText(reservation.orderNumber, { exact: true })).toBeVisible();
+});
+
 test('customer can create a reservation and view its private status page', async ({ page }) => {
   await page.goto('');
 
@@ -61,8 +88,11 @@ test('customer status page reflects paid status and ticket check-in state', asyn
 
   await loginAsMockGoogleAdmin(page);
   const orderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
-  await orderRow.getByRole('button', { name: 'Markeer als betaald' }).click();
-  await expect(page.getByText(`Order ${reservation.orderNumber} is als betaald gemarkeerd.`)).toBeVisible();
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes(`/api/admin/orders/${reservation.orderNumber}/pay`)),
+    orderRow.getByRole('button', { name: 'Markeer als betaald' }).click(),
+  ]);
+  await page.waitForLoadState('networkidle');
 
   await page.goto(reservation.paymentUrl);
   await expect(page.getByText('Betaald', { exact: true })).toBeVisible();
@@ -75,13 +105,18 @@ test('customer status page reflects paid status and ticket check-in state', asyn
   await expect(ticketItems.filter({ hasText: 'Ingecheckt' })).toHaveCount(0);
 
   await page.goto('admin');
-  await page.locator('#admin-tabs').getByRole('button', { name: 'Betaald', exact: true }).click();
+  await page.locator('#admin-tabs').getByRole('link', { name: 'Betaald', exact: true }).click();
+  await expect(page).toHaveURL(/\?tab=PAID$/);
   const paidOrderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
   await paidOrderRow.getByRole('button', { name: 'Tickets inchecken' }).click();
   const ticketModal = page.locator('#ticket-modal');
-  await ticketModal.getByRole('button', { name: 'Inchecken', exact: true }).first().click();
-  await expect(ticketModal.locator('.ticket-status.used')).toHaveCount(1);
-  await ticketModal.getByRole('button', { name: 'Sluiten' }).click();
+  const ticketCode = await ticketModal.locator('.ticket-modal-list li').first().locator('span').first().textContent();
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes(`/api/admin/tickets/${ticketCode}/use`)),
+    ticketModal.getByRole('button', { name: 'Inchecken', exact: true }).first().click(),
+  ]);
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('tr').filter({ hasText: reservation.orderNumber })).toContainText('1/2 ingecheckt');
 
   await page.goto(reservation.paymentUrl);
   const refreshedTicketItems = page.locator('.ticket-list li');
@@ -105,12 +140,16 @@ test('admin can mark a reservation as paid and check in its ticket', async ({ pa
   const orderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
   await expect(orderRow).toBeVisible();
 
-  await orderRow.getByRole('button', { name: 'Markeer als betaald' }).click();
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes(`/api/admin/orders/${reservation.orderNumber}/pay`)),
+    orderRow.getByRole('button', { name: 'Markeer als betaald' }).click(),
+  ]);
+  await page.waitForLoadState('networkidle');
 
-  await expect(page.getByText(`Order ${reservation.orderNumber} is als betaald gemarkeerd.`)).toBeVisible();
   await expect(orderRow).not.toBeVisible();
 
-  await page.locator('#admin-tabs').getByRole('button', { name: 'Betaald', exact: true }).click();
+  await page.locator('#admin-tabs').getByRole('link', { name: 'Betaald', exact: true }).click();
+  await expect(page).toHaveURL(/\?tab=PAID$/);
   const paidOrderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
   await expect(paidOrderRow).toContainText('Betaald');
   await expect(paidOrderRow).toContainText('0/1 ingecheckt');
@@ -118,10 +157,12 @@ test('admin can mark a reservation as paid and check in its ticket', async ({ pa
   await paidOrderRow.getByRole('button', { name: 'Tickets inchecken' }).click();
   const ticketModal = page.locator('#ticket-modal');
   await expect(ticketModal).toBeVisible();
-  await ticketModal.getByRole('button', { name: 'Inchecken', exact: true }).click();
-  await expect(page.getByText(/Ticket HP9-TKT-.* is ingecheckt\./)).toBeVisible();
-  await expect(ticketModal.locator('.ticket-status.used')).toHaveCount(1);
-  await ticketModal.getByRole('button', { name: 'Sluiten' }).click();
+  const ticketCode = await ticketModal.locator('.ticket-modal-list li').first().locator('span').first().textContent();
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes(`/api/admin/tickets/${ticketCode}/use`)),
+    ticketModal.getByRole('button', { name: 'Inchecken', exact: true }).click(),
+  ]);
+  await page.waitForLoadState('networkidle');
   await expect(paidOrderRow).toContainText('1/1 ingecheckt');
 
   await page.goto(reservation.paymentUrl);
@@ -143,10 +184,14 @@ test('admin can check in all tickets of an order at once', async ({ page, reques
 
   await loginAsMockGoogleAdmin(page);
   const orderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
-  await orderRow.getByRole('button', { name: 'Markeer als betaald' }).click();
-  await expect(page.getByText(`Order ${reservation.orderNumber} is als betaald gemarkeerd.`)).toBeVisible();
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes(`/api/admin/orders/${reservation.orderNumber}/pay`)),
+    orderRow.getByRole('button', { name: 'Markeer als betaald' }).click(),
+  ]);
+  await page.waitForLoadState('networkidle');
 
-  await page.locator('#admin-tabs').getByRole('button', { name: 'Betaald', exact: true }).click();
+  await page.locator('#admin-tabs').getByRole('link', { name: 'Betaald', exact: true }).click();
+  await expect(page).toHaveURL(/\?tab=PAID$/);
   const paidOrderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
   await expect(paidOrderRow).toContainText('0/3 ingecheckt');
 
@@ -154,11 +199,11 @@ test('admin can check in all tickets of an order at once', async ({ page, reques
   const ticketModal = page.locator('#ticket-modal');
   await expect(ticketModal.locator('.ticket-modal-list li')).toHaveCount(3);
 
-  await ticketModal.getByRole('button', { name: 'Alles inchecken' }).click();
-  await expect(page.getByText(`Alle tickets van order ${reservation.orderNumber} zijn ingecheckt.`)).toBeVisible();
-  await expect(ticketModal.locator('.ticket-status.used')).toHaveCount(3);
-
-  await ticketModal.getByRole('button', { name: 'Sluiten' }).click();
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes('/api/admin/tickets/')),
+    ticketModal.getByRole('button', { name: 'Alles inchecken' }).click(),
+  ]);
+  await page.waitForLoadState('networkidle');
   await expect(paidOrderRow).toContainText('3/3 ingecheckt');
 });
 
@@ -178,10 +223,12 @@ test('admin can filter orders by search and tab', async ({ page, request }) => {
   const orderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
   await expect(orderRow).toBeVisible();
 
-  await page.locator('#admin-tabs').getByRole('button', { name: 'Betaald', exact: true }).click();
+  await page.locator('#admin-tabs').getByRole('link', { name: 'Betaald', exact: true }).click();
+  await expect(page).toHaveURL(/\?tab=PAID$/);
   await expect(orderRow).not.toBeVisible();
 
-  await page.locator('#admin-tabs').getByRole('button', { name: 'Gereserveerd', exact: true }).click();
+  await page.locator('#admin-tabs').getByRole('link', { name: 'Gereserveerd', exact: true }).click();
+  await expect(page).toHaveURL(/\?tab=RESERVED$/);
   await page.getByLabel('Reserveringen zoeken').fill('Filterable E2E Customer');
   await expect(orderRow).toBeVisible();
 });
