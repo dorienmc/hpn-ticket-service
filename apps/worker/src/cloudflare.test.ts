@@ -315,10 +315,10 @@ describe('Cloudflare Worker shell', () => {
     await sendReservationEmail({
       FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
       EMAIL_DELIVERY: 'gmail',
-      GMAIL_CLIENT_ID: 'client-id',
-      GMAIL_CLIENT_SECRET: 'client-secret',
-      GMAIL_REFRESH_TOKEN: 'refresh-token',
-      GMAIL_FROM_EMAIL: 'tickets@gmail.com',
+      GOOGLE_CLIENT_ID: 'client-id',
+      GOOGLE_CLIENT_SECRET: 'client-secret',
+      GOOGLE_REFRESH_TOKEN: 'refresh-token',
+      GOOGLE_SENDER_EMAIL: 'dorienmc@gmail.com',
     } as never, reservation);
 
     expect(fetchMock).toHaveBeenCalledWith('https://oauth2.googleapis.com/token', expect.objectContaining({
@@ -333,6 +333,8 @@ describe('Cloudflare Worker shell', () => {
     const sendRequest = fetchMock.mock.calls[1]?.[1] as RequestInit;
     const payload = JSON.parse(String(sendRequest.body));
     expect(payload.raw).toEqual(expect.any(String));
+    const mime = Buffer.from(payload.raw, 'base64url').toString();
+    expect(mime).toContain('From: Dorien Lorijn namens Half Past Nine <dorienmc@gmail.com>');
   });
 
   it('requires a reCAPTCHA secret outside local development', async () => {

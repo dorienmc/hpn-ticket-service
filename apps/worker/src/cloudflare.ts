@@ -10,10 +10,9 @@ type Bindings = {
   RESEND_API_KEY: string;
   RESEND_FROM_EMAIL: string;
   EMAIL_DELIVERY?: 'resend' | 'gmail' | 'mailpit' | 'disabled';
-  GMAIL_CLIENT_ID?: string;
-  GMAIL_CLIENT_SECRET?: string;
-  GMAIL_REFRESH_TOKEN?: string;
-  GMAIL_FROM_EMAIL?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  GOOGLE_REFRESH_TOKEN?: string;
+  GOOGLE_SENDER_EMAIL?: string;
   MAILPIT_API_URL?: string;
   LOCAL_ADMIN_AUTH?: string;
   RECAPTCHA_SECRET_KEY?: string;
@@ -265,13 +264,17 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
   }
 
   if (env.EMAIL_DELIVERY === 'gmail') {
+    if (!env.GOOGLE_SENDER_EMAIL) {
+      throw new Error('GOOGLE_SENDER_EMAIL is required when EMAIL_DELIVERY is gmail');
+    }
+
     const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        client_id: env.GMAIL_CLIENT_ID ?? '',
-        client_secret: env.GMAIL_CLIENT_SECRET ?? '',
-        refresh_token: env.GMAIL_REFRESH_TOKEN ?? '',
+        client_id: env.GOOGLE_CLIENT_ID ?? '',
+        client_secret: env.GOOGLE_CLIENT_SECRET ?? '',
+        refresh_token: env.GOOGLE_REFRESH_TOKEN ?? '',
         grant_type: 'refresh_token',
       }),
     });
@@ -282,7 +285,7 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
 
     const mime = [
       'MIME-Version: 1.0',
-      `From: ${sanitizeHeader(env.GMAIL_FROM_EMAIL ?? '')}`,
+      `From: Dorien Lorijn namens Half Past Nine <${sanitizeHeader(env.GOOGLE_SENDER_EMAIL)}>`,
       `To: ${sanitizeHeader(reservation.email)}`,
       `Subject: ${sanitizeHeader(subject)}`,
       'Content-Type: text/html; charset=UTF-8',

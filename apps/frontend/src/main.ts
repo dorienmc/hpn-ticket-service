@@ -157,6 +157,7 @@ async function initApp() {
             await loadGoogleIdentityServices();
             window.google?.accounts.id.initialize({
               client_id: googleClientId,
+              use_fedcm_for_button: true,
               callback: async (credentialResponse) => {
                 const response = await fetch(`${baseUrl}/api/auth/google`, {
                   method: 'POST',

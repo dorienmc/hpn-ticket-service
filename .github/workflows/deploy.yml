@@ -8,11 +8,11 @@ on:
       reservations_enabled:
         description: Enable the public ticket reservation button
         required: true
-        default: 'false'
+        default: 'true'
         type: choice
         options:
-          - 'false'
           - 'true'
+          - 'false'
 
 concurrency:
   group: pages
@@ -49,7 +49,7 @@ jobs:
         run: npm ci
 
       - name: Validate reservation configuration
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.reservations_enabled == 'true' }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.reservations_enabled == 'true' }}
         env:
           CLOUDFLARE_WORKER_URL: ${{ vars.CLOUDFLARE_WORKER_URL }}
           RECAPTCHA_SITE_KEY: ${{ vars.RECAPTCHA_SITE_KEY }}
@@ -62,7 +62,7 @@ jobs:
         env:
           VITE_API_BASE_URL: ${{ vars.CLOUDFLARE_WORKER_URL }}
           VITE_FRONTEND_URL: ${{ steps.frontend-url.outputs.value }}
-          VITE_RESERVATIONS_ENABLED: ${{ github.event_name == 'workflow_dispatch' && inputs.reservations_enabled || 'false' }}
+          VITE_RESERVATIONS_ENABLED: ${{ github.event_name != 'workflow_dispatch' || inputs.reservations_enabled == 'true' }}
           VITE_RECAPTCHA_SITE_KEY: ${{ vars.RECAPTCHA_SITE_KEY }}
           VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
         run: npm run build
