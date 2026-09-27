@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getDb } from './db.js';
 import { config } from './config.js';
+import { MAX_SUPPORTED_TICKET_QUANTITY } from './payment-links.js';
 import type { ReservationInput, ReservationRecord, ReservationStatus, TicketRecord } from './types.js';
 
 function generateOrderNumber(): string {
@@ -38,9 +39,10 @@ export function createReservation(input: ReservationInput): ReservationRecord {
   const name = input.name.trim();
   const email = input.email.trim();
   const quantity = Number(input.quantity);
+  const maximum = Math.min(config.maxTicketsPerReservation, MAX_SUPPORTED_TICKET_QUANTITY);
 
-  if (!name || !email || !Number.isInteger(quantity) || quantity < 1 || quantity > config.maxTicketsPerReservation) {
-    throw new Error(`Quantity must be between 1 and ${config.maxTicketsPerReservation}`);
+  if (!name || !email || !Number.isInteger(quantity) || quantity < 1 || quantity > maximum) {
+    throw new Error(`Quantity must be between 1 and ${maximum}`);
   }
 
   const now = new Date();

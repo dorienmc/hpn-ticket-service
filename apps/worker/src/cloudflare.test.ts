@@ -454,6 +454,21 @@ describe('Cloudflare Worker shell', () => {
     expect(consoleError).toHaveBeenCalled();
   });
 
+  it('rejects quantities above five even when the configured maximum is higher', async () => {
+    const response = await app.request('/api/reservations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Test Customer', email: 'customer@example.com', quantity: 6 }),
+    }, {
+      FRONTEND_URL: 'http://localhost:5173/hpn-ticket-service',
+      LOCAL_ADMIN_AUTH: 'true',
+      MAX_TICKETS_PER_RESERVATION: '10',
+    } as never);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: 'Quantity must be between 1 and 5' });
+  });
+
   it('returns the ING payment link matching the reservation ticket quantity', async () => {
     const paymentLinks = {
       ING_PAYMENT_LINK_1: 'https://ing.example/pay/1',

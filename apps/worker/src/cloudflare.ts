@@ -2,7 +2,7 @@ import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types'
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { ReservationRecord, TicketRecord } from './types.js';
-import { paymentLinkFor } from './payment-links.js';
+import { MAX_SUPPORTED_TICKET_QUANTITY, paymentLinkFor } from './payment-links.js';
 
 type Bindings = {
   DB: D1Database;
@@ -424,7 +424,10 @@ app.post('/api/reservations', async (context) => {
     const name = body.name?.trim() ?? '';
     const email = body.email?.trim().toLowerCase() ?? '';
     const quantity = Number(body.quantity);
-    const maximum = numberFromEnv(context.env.MAX_TICKETS_PER_RESERVATION, 5);
+    const maximum = Math.min(
+      numberFromEnv(context.env.MAX_TICKETS_PER_RESERVATION, MAX_SUPPORTED_TICKET_QUANTITY),
+      MAX_SUPPORTED_TICKET_QUANTITY,
+    );
     if (!name || !email || !Number.isInteger(quantity) || quantity < 1 || quantity > maximum) {
       return context.json({ error: `Quantity must be between 1 and ${maximum}` }, 400);
     }
