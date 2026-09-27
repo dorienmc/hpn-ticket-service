@@ -12,6 +12,7 @@ type Bindings = {
   EMAIL_DELIVERY?: 'resend' | 'gmail' | 'mailpit' | 'disabled';
   GOOGLE_CLIENT_SECRET?: string;
   GOOGLE_REFRESH_TOKEN?: string;
+  GOOGLE_SENDER_EMAIL?: string;
   MAILPIT_API_URL?: string;
   LOCAL_ADMIN_AUTH?: string;
   RECAPTCHA_SECRET_KEY?: string;
@@ -263,6 +264,10 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
   }
 
   if (env.EMAIL_DELIVERY === 'gmail') {
+    if (!env.GOOGLE_SENDER_EMAIL) {
+      throw new Error('GOOGLE_SENDER_EMAIL is required when EMAIL_DELIVERY is gmail');
+    }
+
     const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -278,17 +283,9 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
       throw new Error(tokenPayload.error_description || `Gmail token request failed (${tokenResponse.status})`);
     }
 
-    const profileResponse = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
-      headers: { Authorization: `Bearer ${tokenPayload.access_token}` },
-    });
-    const profile = await profileResponse.json<{ emailAddress?: string }>();
-    if (!profileResponse.ok || !profile.emailAddress) {
-      throw new Error(`Gmail profile request failed (${profileResponse.status})`);
-    }
-
     const mime = [
       'MIME-Version: 1.0',
-      `From: Half Past Nine <${sanitizeHeader(profile.emailAddress)}>`,
+      `From: Dorien Lorijn namens Half Past Nine <${sanitizeHeader(env.GOOGLE_SENDER_EMAIL)}>`,
       `To: ${sanitizeHeader(reservation.email)}`,
       `Subject: ${sanitizeHeader(subject)}`,
       'Content-Type: text/html; charset=UTF-8',
