@@ -60,7 +60,7 @@ For production, set these values through `apps/worker/wrangler.jsonc` vars or Cl
 
 Production deployment is split into two phases:
 
-1. **GitHub Pages:** `.github/workflows/deploy.yml` builds and publishes the static frontend. Reservations remain disabled while the `RESERVATIONS_ENABLED` repository variable is unset or `false`.
+1. **GitHub Pages:** `.github/workflows/deploy.yml` builds and publishes the static frontend. Reservations are enabled by default. Manual deployments can temporarily disable them with the `reservations_enabled` input.
 2. **Cloudflare:** the production API runs as a Cloudflare Worker with D1 and Cloudflare Access. Production email delivery uses the Gmail API. `.github/workflows/deploy-cloudflare.yml` performs the D1 schema setup and Worker deployment manually.
 
 Local development keeps reservations enabled by default.
@@ -143,7 +143,7 @@ When `ADMIN_PASSWORD` is set, the admin login page also accepts that password an
 	| `RECAPTCHA_SITE_KEY` | Public Google reCAPTCHA v3 site key |
 	| `GOOGLE_CLIENT_ID` | Google OAuth client ID, passed to the frontend as `VITE_GOOGLE_CLIENT_ID` |
 
-Rerun **Deploy GitHub Pages** manually and choose `reservations_enabled=true` to enable the public reservation button. Push-triggered Pages deploys keep reservations blocked by default.
+Rerun **Deploy GitHub Pages** after configuring the repository variables. Reservations are enabled for push-triggered deployments and by default for manual deployments; choose `reservations_enabled=false` in a manual run to temporarily disable the public reservation button.
 
 ## Testing the reservation flow
 
