@@ -22,9 +22,16 @@ const reservation: ReservationRecord = {
 } as const;
 
 function createReservationDb(reservationToFind = reservation) {
+  let storedReservation = reservationToFind;
+
   function createPreparedResult(statement: string, args: unknown[]) {
     return {
       async run() {
+        if (statement.includes("UPDATE orders SET status = 'EXPIRED'")
+          && storedReservation.status === 'RESERVED'
+          && storedReservation.expires_at <= String(args[0])) {
+          storedReservation = { ...storedReservation, status: 'EXPIRED' };
+        }
         return { meta: { changes: 1 } };
       },
       async first<T>() {
@@ -47,13 +54,13 @@ function createReservationDb(reservationToFind = reservation) {
           } as T;
         }
         if (statement.includes('SELECT * FROM orders WHERE order_number')) {
-          return reservationToFind as T;
+          return storedReservation as T;
         }
         return null as T;
       },
       async all<T>() {
         if (statement.includes('SELECT * FROM orders ORDER BY created_at DESC')) {
-          return { results: [reservation] as T[] };
+          return { results: [storedReservation] as T[] };
         }
         return { results: [] as T[] };
       },
@@ -481,7 +488,11 @@ describe('Cloudflare Worker shell', () => {
     for (const quantity of [1, 2, 3, 4, 5]) {
       const response = await app.request('/api/reservations/HP9-1234-ABCD/token123', {}, {
         FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
-        DB: createReservationDb({ ...reservation, quantity }),
+        DB: createReservationDb({
+          ...reservation,
+          quantity,
+          expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        }),
         ...paymentLinks,
       } as never);
 
@@ -493,11 +504,33 @@ describe('Cloudflare Worker shell', () => {
     }
   });
 
-      DB: createReservationDb({ ...reservation, quantity: 4, expires_at: '2099-01-01T00:00:00.000Z' }),
+  it('returns a 503 when the payment link for the reservation quantity is not configured', async () => {
+    const response = await app.request('/api/reservations/HP9-1234-ABCD/token123', {}, {
+      FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
+      DB: createReservationDb({
+        ...reservation,
+        quantity: 4,
+        expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      }),
+    } as never);
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({
       error: 'Payment link for 4 ticket(s) is not configured',
     });
+  });
+
+  it('returns an expired reservation without requiring a payment link', async () => {
+    const response = await app.request('/api/reservations/HP9-1234-ABCD/token123', {}, {
+      FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
+      DB: createReservationDb({ ...reservation, quantity: 4 }),
+    } as never);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({
+      status: 'EXPIRED',
+      expired: true,
+      paymentLink: null,
+    }));
   });
 });
