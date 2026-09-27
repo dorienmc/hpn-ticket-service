@@ -493,11 +493,7 @@ describe('Cloudflare Worker shell', () => {
     }
   });
 
-  it('reports a missing payment link for an unpaid reservation', async () => {
-    const response = await app.request('/api/reservations/HP9-1234-ABCD/token123', {}, {
-      FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
-      DB: createReservationDb({ ...reservation, quantity: 4 }),
-    } as never);
+      DB: createReservationDb({ ...reservation, quantity: 4, expires_at: '2099-01-01T00:00:00.000Z' }),
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({
