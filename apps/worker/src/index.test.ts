@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { cancelReservation, createReservation, extendReservation, getAvailableCapacity, expireReservations, findReservationByToken, listOrders, listTickets, markOrderPaid, markTicketUsed, getReservationStatusSummary } from './services.js';
+import { config } from './config.js';
 import { getDb } from './db.js';
 
 beforeEach(() => {
@@ -22,6 +23,20 @@ describe('reservation flow', () => {
   it('rejects invalid reservation quantities', () => {
     expect(() => createReservation({ name: 'Invalid', email: 'invalid@example.com', quantity: 0 })).toThrow();
     expect(() => createReservation({ name: 'Too many', email: 'many@example.com', quantity: 6 })).toThrow();
+  });
+
+  it('caps reservation quantities at the supported payment-link range', () => {
+    const configuredMaximum = config.maxTicketsPerReservation;
+    config.maxTicketsPerReservation = 10;
+
+    try {
+      expect(() => createReservation({ name: 'Too many', email: 'many@example.com', quantity: 6 })).toThrow(
+        'Quantity must be between 1 and 5',
+      );
+      expect(createReservation({ name: 'Maximum', email: 'maximum@example.com', quantity: 5 }).quantity).toBe(5);
+    } finally {
+      config.maxTicketsPerReservation = configuredMaximum;
+    }
   });
 
   it('returns capacity based on active reservations', () => {

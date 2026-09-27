@@ -44,7 +44,7 @@ The backend runs the same Worker entrypoint used in production. Wrangler provide
 
 Mailpit remains useful because its HTTP Send API is compatible with the Worker runtime. Local Worker email requests go to Mailpit over HTTP; production requests use the Gmail API.
 
-The backend settings can be configured with environment variables. `TOTAL_CAPACITY`, `MAX_TICKETS_PER_RESERVATION`, `TICKET_PRICE_CENTS`, and `RESERVATION_TTL_HOURS` come from the `vars` block in `apps/worker/wrangler.jsonc` (Wrangler loads the same file locally and in production); `FRONTEND_URL`, `EMAIL_DELIVERY`, `MAILPIT_API_URL`, `LOCAL_ADMIN_AUTH`, and `ING_PAYMENT_LINK` are passed as `--var` flags from `docker-compose.yml` for local development:
+The backend settings can be configured with environment variables. `TOTAL_CAPACITY`, `MAX_TICKETS_PER_RESERVATION`, `TICKET_PRICE_CENTS`, and `RESERVATION_TTL_HOURS` come from the `vars` block in `apps/worker/wrangler.jsonc` (Wrangler loads the same file locally and in production); `FRONTEND_URL`, `EMAIL_DELIVERY`, `MAILPIT_API_URL`, `LOCAL_ADMIN_AUTH`, and the five `ING_PAYMENT_LINK_*` variables are passed as `--var` flags from `docker-compose.yml` for local development:
 
 | Variable | Local default | Purpose |
 | --- | ---: | --- |
@@ -52,9 +52,13 @@ The backend settings can be configured with environment variables. `TOTAL_CAPACI
 | `MAX_TICKETS_PER_RESERVATION` | `5` | Maximum tickets in one reservation |
 | `TICKET_PRICE_CENTS` | `1000` | Price per ticket in cents |
 | `RESERVATION_TTL_HOURS` | `48` | Reservation lifetime before expiry |
-| `ING_PAYMENT_LINK` | Demo URL | Payment link shown on the private page |
+| `ING_PAYMENT_LINK_1` | Demo URL | ING payment link for a 1-ticket reservation |
+| `ING_PAYMENT_LINK_2` | Demo URL | ING payment link for a 2-ticket reservation |
+| `ING_PAYMENT_LINK_3` | Demo URL | ING payment link for a 3-ticket reservation |
+| `ING_PAYMENT_LINK_4` | Demo URL | ING payment link for a 4-ticket reservation |
+| `ING_PAYMENT_LINK_5` | Demo URL | ING payment link for a 5-ticket reservation |
 
-For production, set these values through `apps/worker/wrangler.jsonc` vars or Cloudflare Worker secrets rather than committing real payment links to Compose.
+The private reservation page selects the link matching the reservation's ticket quantity. For production, configure each `ING_PAYMENT_LINK_1` through `ING_PAYMENT_LINK_5` as a Cloudflare Worker secret; do not commit real payment links to Compose or Wrangler configuration.
 
 ## Production rollout
 
@@ -80,7 +84,11 @@ Local development keeps reservations enabled by default.
 3. Store runtime secrets directly in Cloudflare. Do not commit their values:
 
 	```bash
-	npx wrangler secret put ING_PAYMENT_LINK
+	npx wrangler secret put ING_PAYMENT_LINK_1
+	npx wrangler secret put ING_PAYMENT_LINK_2
+	npx wrangler secret put ING_PAYMENT_LINK_3
+	npx wrangler secret put ING_PAYMENT_LINK_4
+	npx wrangler secret put ING_PAYMENT_LINK_5
 	npx wrangler secret put RECAPTCHA_SECRET_KEY
 	```
 

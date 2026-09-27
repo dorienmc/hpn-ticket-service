@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { app, base64UrlEncode, sendReservationEmail, verifyGoogleIdToken, verifyRecaptcha } from './cloudflare.js';
+import type { ReservationRecord } from './types.js';
 
 const env = {
   FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
 } as never;
 
-const reservation = {
+const reservation: ReservationRecord = {
   id: 1,
   order_number: 'HP9-1234-ABCD',
   access_token: 'token123',
@@ -20,10 +21,17 @@ const reservation = {
   notes: null,
 } as const;
 
-function createReservationDb() {
+function createReservationDb(reservationToFind = reservation) {
+  let storedReservation = reservationToFind;
+
   function createPreparedResult(statement: string, args: unknown[]) {
     return {
       async run() {
+        if (statement.includes("UPDATE orders SET status = 'EXPIRED'")
+          && storedReservation.status === 'RESERVED'
+          && storedReservation.expires_at <= String(args[0])) {
+          storedReservation = { ...storedReservation, status: 'EXPIRED' };
+        }
         return { meta: { changes: 1 } };
       },
       async first<T>() {
@@ -45,11 +53,14 @@ function createReservationDb() {
             expires_at: expiresAt,
           } as T;
         }
+        if (statement.includes('SELECT * FROM orders WHERE order_number')) {
+          return storedReservation as T;
+        }
         return null as T;
       },
       async all<T>() {
         if (statement.includes('SELECT * FROM orders ORDER BY created_at DESC')) {
-          return { results: [reservation] as T[] };
+          return { results: [storedReservation] as T[] };
         }
         return { results: [] as T[] };
       },
@@ -448,5 +459,78 @@ describe('Cloudflare Worker shell', () => {
       paymentUrl: expect.stringContaining('/payment/'),
     }));
     expect(consoleError).toHaveBeenCalled();
+  });
+
+  it('rejects quantities above five even when the configured maximum is higher', async () => {
+    const response = await app.request('/api/reservations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Test Customer', email: 'customer@example.com', quantity: 6 }),
+    }, {
+      FRONTEND_URL: 'http://localhost:5173/hpn-ticket-service',
+      LOCAL_ADMIN_AUTH: 'true',
+      MAX_TICKETS_PER_RESERVATION: '10',
+    } as never);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: 'Quantity must be between 1 and 5' });
+  });
+
+  it('returns the ING payment link matching the reservation ticket quantity', async () => {
+    const paymentLinks = {
+      ING_PAYMENT_LINK_1: 'https://ing.example/pay/1',
+      ING_PAYMENT_LINK_2: 'https://ing.example/pay/2',
+      ING_PAYMENT_LINK_3: 'https://ing.example/pay/3',
+      ING_PAYMENT_LINK_4: 'https://ing.example/pay/4',
+      ING_PAYMENT_LINK_5: 'https://ing.example/pay/5',
+    };
+
+    for (const quantity of [1, 2, 3, 4, 5]) {
+      const response = await app.request('/api/reservations/HP9-1234-ABCD/token123', {}, {
+        FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
+        DB: createReservationDb({
+          ...reservation,
+          quantity,
+          expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        }),
+        ...paymentLinks,
+      } as never);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual(expect.objectContaining({
+        quantity,
+        paymentLink: Object.values(paymentLinks)[quantity - 1],
+      }));
+    }
+  });
+
+  it('returns a 503 when the payment link for the reservation quantity is not configured', async () => {
+    const response = await app.request('/api/reservations/HP9-1234-ABCD/token123', {}, {
+      FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
+      DB: createReservationDb({
+        ...reservation,
+        quantity: 4,
+        expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      }),
+    } as never);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Payment link for 4 ticket(s) is not configured',
+    });
+  });
+
+  it('returns an expired reservation without requiring a payment link', async () => {
+    const response = await app.request('/api/reservations/HP9-1234-ABCD/token123', {}, {
+      FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
+      DB: createReservationDb({ ...reservation, quantity: 4 }),
+    } as never);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({
+      status: 'EXPIRED',
+      expired: true,
+      paymentLink: null,
+    }));
   });
 });

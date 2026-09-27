@@ -45,7 +45,11 @@ services:
       --var EMAIL_DELIVERY:mailpit
       --var MAILPIT_API_URL:http://mailpit:8025
       --var LOCAL_ADMIN_AUTH:true
-      --var ING_PAYMENT_LINK:https://www.ing.nl/payreq/m/?trxid=example-demo-link"
+      --var ING_PAYMENT_LINK_1:https://www.ing.nl/payreq/m/?trxid=example-demo-link-1-ticket
+      --var ING_PAYMENT_LINK_2:https://www.ing.nl/payreq/m/?trxid=example-demo-link-2-tickets
+      --var ING_PAYMENT_LINK_3:https://www.ing.nl/payreq/m/?trxid=example-demo-link-3-tickets
+      --var ING_PAYMENT_LINK_4:https://www.ing.nl/payreq/m/?trxid=example-demo-link-4-tickets
+      --var ING_PAYMENT_LINK_5:https://www.ing.nl/payreq/m/?trxid=example-demo-link-5-tickets"
     environment:
       CI: 'true'
       FRONTEND_URL: *frontend-url

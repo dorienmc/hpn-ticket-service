@@ -2,11 +2,16 @@ import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types'
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { ReservationRecord, TicketRecord } from './types.js';
+import { MAX_SUPPORTED_TICKET_QUANTITY, paymentLinkFor } from './payment-links.js';
 
 type Bindings = {
   DB: D1Database;
   FRONTEND_URL: string;
-  ING_PAYMENT_LINK: string;
+  ING_PAYMENT_LINK_1?: string;
+  ING_PAYMENT_LINK_2?: string;
+  ING_PAYMENT_LINK_3?: string;
+  ING_PAYMENT_LINK_4?: string;
+  ING_PAYMENT_LINK_5?: string;
   RESEND_API_KEY: string;
   RESEND_FROM_EMAIL: string;
   EMAIL_DELIVERY?: 'resend' | 'gmail' | 'mailpit' | 'disabled';
@@ -419,7 +424,10 @@ app.post('/api/reservations', async (context) => {
     const name = body.name?.trim() ?? '';
     const email = body.email?.trim().toLowerCase() ?? '';
     const quantity = Number(body.quantity);
-    const maximum = numberFromEnv(context.env.MAX_TICKETS_PER_RESERVATION, 5);
+    const maximum = Math.min(
+      numberFromEnv(context.env.MAX_TICKETS_PER_RESERVATION, MAX_SUPPORTED_TICKET_QUANTITY),
+      MAX_SUPPORTED_TICKET_QUANTITY,
+    );
     if (!name || !email || !Number.isInteger(quantity) || quantity < 1 || quantity > maximum) {
       return context.json({ error: `Quantity must be between 1 and ${maximum}` }, 400);
     }
@@ -474,6 +482,16 @@ app.get('/api/reservations/:orderNumber/:token', async (context) => {
   const reservation = await context.env.DB.prepare('SELECT * FROM orders WHERE order_number = ? AND access_token = ?')
     .bind(context.req.param('orderNumber'), context.req.param('token')).first<ReservationRecord>();
   if (!reservation) return context.json({ error: 'Reservation not found' }, 404);
+  const paymentLink = paymentLinkFor(reservation.quantity, {
+    1: context.env.ING_PAYMENT_LINK_1,
+    2: context.env.ING_PAYMENT_LINK_2,
+    3: context.env.ING_PAYMENT_LINK_3,
+    4: context.env.ING_PAYMENT_LINK_4,
+    5: context.env.ING_PAYMENT_LINK_5,
+  });
+  if (reservation.status === 'RESERVED' && !paymentLink) {
+    return context.json({ error: `Payment link for ${reservation.quantity} ticket(s) is not configured` }, 503);
+  }
   return context.json({
     orderNumber: reservation.order_number,
     name: reservation.name,
@@ -484,7 +502,7 @@ app.get('/api/reservations/:orderNumber/:token', async (context) => {
     createdAt: reservation.created_at,
     expiresAt: reservation.expires_at,
     expired: reservation.status === 'EXPIRED',
-    paymentLink: context.env.ING_PAYMENT_LINK,
+    paymentLink: paymentLink ?? null,
     tickets: reservation.status === 'PAID' ? await ticketsForOrder(context.env.DB, reservation.order_number) : [],
   });
 });

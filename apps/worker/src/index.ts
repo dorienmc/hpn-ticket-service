@@ -3,6 +3,7 @@ import express, { type Request, type Response } from 'express';
 import { config } from './config.js';
 import { cancelReservation, createReservation, expireReservations, extendReservation, findReservationByToken, getAvailableCapacity, getReservationStatusSummary, listOrders, listTickets, markOrderPaid, markTicketUsed } from './services.js';
 import { sendReservationEmail } from './email.js';
+import { paymentLinkFor } from './payment-links.js';
 
 const app = express();
 
@@ -107,9 +108,15 @@ app.get('/api/reservations/:orderNumber/:token', (req: Request, res: Response) =
 
   const now = new Date();
   const expiresAt = new Date(reservation.expires_at);
+  const paymentLink = paymentLinkFor(reservation.quantity, config.paymentLinks);
 
   if (reservation.status === 'RESERVED' && now > expiresAt) {
     reservation.status = 'EXPIRED';
+  }
+
+  if (reservation.status === 'RESERVED' && !paymentLink) {
+    res.status(503).json({ error: `Payment link for ${reservation.quantity} ticket(s) is not configured` });
+    return;
   }
 
   res.json({
@@ -122,7 +129,7 @@ app.get('/api/reservations/:orderNumber/:token', (req: Request, res: Response) =
     createdAt: reservation.created_at,
     expiresAt: reservation.expires_at,
     expired: now > expiresAt,
-    paymentLink: config.paymentLink,
+    paymentLink: paymentLink ?? null,
     tickets: reservation.status === 'PAID' ? listTickets(reservation.order_number) : [],
   });
 });
