@@ -310,27 +310,31 @@ describe('Cloudflare Worker shell', () => {
   it('sends reservation emails through Gmail API', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
       access_token: 'gmail-access-token',
+    }))).mockResolvedValueOnce(new Response(JSON.stringify({
+      emailAddress: 'tickets@gmail.com',
     }))).mockResolvedValueOnce(new Response(JSON.stringify({ id: 'gmail-message-id' })));
 
     await sendReservationEmail({
       FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
       EMAIL_DELIVERY: 'gmail',
-      GMAIL_CLIENT_ID: 'client-id',
-      GMAIL_CLIENT_SECRET: 'client-secret',
-      GMAIL_REFRESH_TOKEN: 'refresh-token',
-      GMAIL_FROM_EMAIL: 'tickets@gmail.com',
+      GOOGLE_CLIENT_ID: 'client-id',
+      GOOGLE_CLIENT_SECRET: 'client-secret',
+      GOOGLE_REFRESH_TOKEN: 'refresh-token',
     } as never, reservation);
 
     expect(fetchMock).toHaveBeenCalledWith('https://oauth2.googleapis.com/token', expect.objectContaining({
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     }));
+    expect(fetchMock).toHaveBeenCalledWith('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+      headers: { Authorization: 'Bearer gmail-access-token' },
+    });
     expect(fetchMock).toHaveBeenCalledWith('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', expect.objectContaining({
       method: 'POST',
       headers: { Authorization: 'Bearer gmail-access-token', 'Content-Type': 'application/json' },
     }));
 
-    const sendRequest = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    const sendRequest = fetchMock.mock.calls[2]?.[1] as RequestInit;
     const payload = JSON.parse(String(sendRequest.body));
     expect(payload.raw).toEqual(expect.any(String));
   });

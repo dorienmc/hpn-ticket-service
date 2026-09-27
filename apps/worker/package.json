@@ -15,6 +15,7 @@
     "db:migrate:local": "wrangler d1 migrations apply hpn-ticket-service-prod --local",
     "db:migrate:remote": "wrangler d1 execute hpn-ticket-service-prod --remote --file migrations/0001_initial.sql",
     "deploy:cloudflare": "wrangler deploy",
+    "verify:gmail-token": "bash scripts/verify-google-refresh-token.sh",
     "test": "vitest run"
   },
   "dependencies": {

@@ -10,10 +10,8 @@ type Bindings = {
   RESEND_API_KEY: string;
   RESEND_FROM_EMAIL: string;
   EMAIL_DELIVERY?: 'resend' | 'gmail' | 'mailpit' | 'disabled';
-  GMAIL_CLIENT_ID?: string;
-  GMAIL_CLIENT_SECRET?: string;
-  GMAIL_REFRESH_TOKEN?: string;
-  GMAIL_FROM_EMAIL?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  GOOGLE_REFRESH_TOKEN?: string;
   MAILPIT_API_URL?: string;
   LOCAL_ADMIN_AUTH?: string;
   RECAPTCHA_SECRET_KEY?: string;
@@ -269,9 +267,9 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        client_id: env.GMAIL_CLIENT_ID ?? '',
-        client_secret: env.GMAIL_CLIENT_SECRET ?? '',
-        refresh_token: env.GMAIL_REFRESH_TOKEN ?? '',
+        client_id: env.GOOGLE_CLIENT_ID ?? '',
+        client_secret: env.GOOGLE_CLIENT_SECRET ?? '',
+        refresh_token: env.GOOGLE_REFRESH_TOKEN ?? '',
         grant_type: 'refresh_token',
       }),
     });
@@ -280,9 +278,17 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
       throw new Error(tokenPayload.error_description || `Gmail token request failed (${tokenResponse.status})`);
     }
 
+    const profileResponse = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+      headers: { Authorization: `Bearer ${tokenPayload.access_token}` },
+    });
+    const profile = await profileResponse.json<{ emailAddress?: string }>();
+    if (!profileResponse.ok || !profile.emailAddress) {
+      throw new Error(`Gmail profile request failed (${profileResponse.status})`);
+    }
+
     const mime = [
       'MIME-Version: 1.0',
-      `From: ${sanitizeHeader(env.GMAIL_FROM_EMAIL ?? '')}`,
+      `From: Half Past Nine <${sanitizeHeader(profile.emailAddress)}>`,
       `To: ${sanitizeHeader(reservation.email)}`,
       `Subject: ${sanitizeHeader(subject)}`,
       'Content-Type: text/html; charset=UTF-8',

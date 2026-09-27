@@ -42,7 +42,7 @@ This starts:
 
 The backend runs the same Worker entrypoint used in production. Wrangler provides the local Worker runtime and persists the local D1 database in a Docker volume.
 
-Mailpit remains useful because its HTTP Send API is compatible with the Worker runtime. Local Worker email requests go to Mailpit over HTTP; production requests use Resend's HTTP API. Resend itself is a hosted email service and does not run as a local Compose container.
+Mailpit remains useful because its HTTP Send API is compatible with the Worker runtime. Local Worker email requests go to Mailpit over HTTP; production requests use the Gmail API.
 
 The backend settings can be configured with environment variables. `TOTAL_CAPACITY`, `MAX_TICKETS_PER_RESERVATION`, `TICKET_PRICE_CENTS`, and `RESERVATION_TTL_HOURS` come from the `vars` block in `apps/worker/wrangler.jsonc` (Wrangler loads the same file locally and in production); `FRONTEND_URL`, `EMAIL_DELIVERY`, `MAILPIT_API_URL`, `LOCAL_ADMIN_AUTH`, and `ING_PAYMENT_LINK` are passed as `--var` flags from `docker-compose.yml` for local development:
 
@@ -61,7 +61,7 @@ For production, set these values through `apps/worker/wrangler.jsonc` vars or Cl
 Production deployment is split into two phases:
 
 1. **GitHub Pages:** `.github/workflows/deploy.yml` builds and publishes the static frontend. Reservations remain disabled while the `RESERVATIONS_ENABLED` repository variable is unset or `false`.
-2. **Cloudflare:** the production API runs as a Cloudflare Worker with D1 and Cloudflare Access. Production email delivery is disabled until a sending provider is configured. `.github/workflows/deploy-cloudflare.yml` performs the D1 schema setup and Worker deployment manually.
+2. **Cloudflare:** the production API runs as a Cloudflare Worker with D1 and Cloudflare Access. Production email delivery uses the Gmail API. `.github/workflows/deploy-cloudflare.yml` performs the D1 schema setup and Worker deployment manually.
 
 Local development keeps reservations enabled by default.
 
@@ -84,7 +84,24 @@ Local development keeps reservations enabled by default.
 	npx wrangler secret put RECAPTCHA_SECRET_KEY
 	```
 
-Email delivery can be enabled later by setting `EMAIL_DELIVERY` to `gmail` or `resend` and adding the matching provider secrets. Until then, reservations are created without sending customer email.
+Production email delivery is enabled with `EMAIL_DELIVERY=gmail`. Store the Gmail OAuth credentials as Worker secrets:
+
+	```bash
+	npx wrangler secret put GOOGLE_CLIENT_ID
+	npx wrangler secret put GOOGLE_CLIENT_SECRET
+	npx wrangler secret put GOOGLE_REFRESH_TOKEN
+	```
+
+The refresh token must include the `https://www.googleapis.com/auth/gmail.send` scope. The Worker reads the authenticated account address from the Gmail profile API and uses it as the sender.
+
+To verify the refresh token locally without deploying the Worker or sending an email, run:
+
+	```bash
+	cd apps/worker
+	npm run verify:gmail-token
+	```
+
+The script prompts for the three Google credentials without displaying the secret or refresh token, exchanges the refresh token with Google, and verifies that the resulting access token includes the `gmail.send` scope. It does not save the credentials.
 
 To protect the public reservation form, create a Google reCAPTCHA v3 key pair for the GitHub Pages domain and use the `reserve` action. Store the secret key in Cloudflare as `RECAPTCHA_SECRET_KEY`. Store the public site key as a GitHub Actions repository variable named `RECAPTCHA_SITE_KEY` so the Pages build can pass it to the frontend as `VITE_RECAPTCHA_SITE_KEY`. Outside local development, the Worker now rejects public reservations until `RECAPTCHA_SECRET_KEY` is configured, and the Pages deploy workflow refuses to enable reservations unless the frontend reCAPTCHA configuration is present.
 
