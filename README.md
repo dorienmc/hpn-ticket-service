@@ -92,7 +92,7 @@ Production email delivery is enabled with `EMAIL_DELIVERY=gmail`. Store the Gmai
 	npx wrangler secret put GOOGLE_REFRESH_TOKEN
 	```
 
-The refresh token must include the `https://www.googleapis.com/auth/gmail.send` scope. The Worker reads the authenticated account address from the Gmail profile API and uses it as the sender.
+The Worker sends from the fixed `GOOGLE_SENDER_EMAIL` address (currently `dorienmc@gmail.com` in `apps/worker/wrangler.jsonc`), which must be an address authorized by the Gmail account.
 
 To verify the refresh token locally without deploying the Worker or sending an email, run:
 
