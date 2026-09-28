@@ -585,7 +585,7 @@ async function initApp() {
             <div class="reservation-event-details">
               <p><span aria-hidden="true">▣</span> Zondag 8 november 2026</p>
               <p><span aria-hidden="true">◷</span> 15:00 uur</p>
-              <p><span aria-hidden="true">⌖</span> Twekkelerveld – Lambertus<br>Buddestraat 1, 7521 SB Enschede</p>
+              <p><span aria-hidden="true">⌖</span> Twekkelerpoort – Lambertus<br>Buddestraat 1, 7521 SB Enschede</p>
             </div>
           </div>
         </header>
