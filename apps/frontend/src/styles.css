@@ -634,11 +634,275 @@ select {
 }
 
 .reservation-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   margin-top: 40px;
   color: white;
   font: 600 1.8rem "Caveat", cursive;
   text-align: center;
   transform: rotate(-2deg);
+}
+
+.reservation-footer a {
+  color: white;
+  font: 600 0.8rem "Inter", sans-serif;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transform: rotate(2deg);
+}
+
+.privacy-page {
+  --privacy-teal: #087b76;
+  --privacy-yellow: #f5c900;
+  --privacy-ink: #101010;
+  width: 100%;
+  min-height: 100vh;
+  padding: 32px 24px 48px;
+  color: var(--privacy-ink);
+  background:
+    radial-gradient(circle at 8% 8%, rgba(255, 255, 255, 0.16), transparent 22rem),
+    linear-gradient(150deg, #087b76 0%, #14968d 46%, #2eb3aa 100%);
+}
+
+.privacy-shell {
+  width: min(1040px, 100%);
+  margin: 0 auto;
+}
+
+.privacy-header {
+  max-width: 730px;
+  margin: 18px auto 34px;
+  color: white;
+}
+
+.privacy-back-link {
+  display: inline-block;
+  margin-bottom: 48px;
+  color: white;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.privacy-back-link:hover,
+.privacy-footer a:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.privacy-kicker,
+.privacy-updated,
+.privacy-section-number {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.privacy-kicker {
+  color: var(--privacy-yellow);
+}
+
+.privacy-header h1 {
+  max-width: 12ch;
+  margin: 8px 0 18px;
+  font-family: Inter, system-ui, sans-serif;
+  font-size: clamp(2.6rem, 6vw, 4.6rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.privacy-lead {
+  max-width: 46ch;
+  margin: 0 0 18px;
+  font-size: clamp(1rem, 2vw, 1.2rem);
+  line-height: 1.6;
+}
+
+.privacy-updated {
+  opacity: 0.78;
+  letter-spacing: 0.08em;
+}
+
+.privacy-card {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: clamp(30px, 6vw, 80px);
+  padding: clamp(26px, 5vw, 64px);
+  background: var(--privacy-paper, #f8f6ed);
+  box-shadow: 12px 14px 0 rgba(16, 16, 16, 0.78);
+}
+
+.privacy-contents {
+  position: sticky;
+  top: 24px;
+  align-self: start;
+  display: grid;
+  gap: 12px;
+  padding-top: 5px;
+}
+
+.privacy-contents span {
+  margin-bottom: 8px;
+  color: var(--privacy-teal);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.privacy-contents a {
+  color: #43504d;
+  font-size: 0.86rem;
+  line-height: 1.4;
+  text-decoration: none;
+}
+
+.privacy-contents a:hover {
+  color: var(--privacy-teal);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.privacy-copy {
+  max-width: 650px;
+}
+
+.privacy-copy section {
+  scroll-margin-top: 24px;
+  padding: 0 0 38px;
+  margin: 0 0 38px;
+  border-bottom: 1px solid #d8ded9;
+}
+
+.privacy-copy section:last-of-type {
+  margin-bottom: 30px;
+}
+
+.privacy-section-number {
+  margin-bottom: 10px;
+  color: var(--privacy-teal);
+}
+
+.privacy-copy h2 {
+  margin: 0 0 14px;
+  font-family: Inter, system-ui, sans-serif;
+  font-size: clamp(1.3rem, 3vw, 1.7rem);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.privacy-copy p,
+.privacy-copy li {
+  color: #43504d;
+  font-size: 0.95rem;
+  line-height: 1.75;
+}
+
+.privacy-copy p {
+  margin: 0 0 14px;
+}
+
+.privacy-copy p:last-child {
+  margin-bottom: 0;
+}
+
+.privacy-copy ul {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding-left: 20px;
+}
+
+.privacy-copy li::marker {
+  color: var(--privacy-teal);
+}
+
+.privacy-copy a {
+  color: var(--privacy-teal);
+  font-weight: 700;
+}
+
+.privacy-copy code {
+  padding: 2px 5px;
+  border-radius: 3px;
+  color: #24312e;
+  background: #e5ebe7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+}
+
+.privacy-copy blockquote {
+  margin: 16px 0;
+  padding: 14px 18px;
+  border-left: 4px solid var(--privacy-yellow);
+  color: #43504d;
+  background: #fffdf4;
+  font-size: 0.9rem;
+  line-height: 1.65;
+}
+
+.privacy-note {
+  display: grid;
+  gap: 5px;
+  padding: 18px 20px;
+  border-left: 5px solid var(--privacy-yellow);
+  background: #fffdf4;
+}
+
+.privacy-note strong {
+  font-size: 0.95rem;
+}
+
+.privacy-note span {
+  color: #43504d;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.privacy-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 730px;
+  margin: 28px auto 0;
+  color: white;
+  font-size: 0.8rem;
+}
+
+.privacy-footer a {
+  color: white;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+@media (max-width: 720px) {
+  .privacy-page {
+    padding: 20px 16px 32px;
+  }
+
+  .privacy-back-link {
+    margin-bottom: 34px;
+  }
+
+  .privacy-card {
+    grid-template-columns: 1fr;
+    gap: 30px;
+    box-shadow: 7px 8px 0 rgba(16, 16, 16, 0.78);
+  }
+
+  .privacy-contents {
+    position: static;
+    padding: 0 0 22px;
+    border-bottom: 1px solid #d8ded9;
+  }
 }
 
 .reservation-preview--option-1 .reservation-layout {
