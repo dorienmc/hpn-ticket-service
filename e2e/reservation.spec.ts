@@ -9,6 +9,31 @@ async function loginAsMockGoogleAdmin(page: import('@playwright/test').Page): Pr
   await expect(page).toHaveURL(/\/hpn-ticket-service\/admin\/?$/);
 }
 
+test('customer can navigate to and from the privacy statement page', async ({ page }) => {
+  await page.goto('');
+  await page.getByRole('link', { name: 'Privacyverklaring' }).click();
+
+  await expect(page).toHaveURL(/\/hpn-ticket-service\/privacyverklaring$/);
+  await expect(page.getByRole('heading', { name: 'Privacyverklaring', level: 1 })).toBeVisible();
+
+  await page.getByRole('link', { name: '← Terug naar reserveren' }).click();
+  await expect(page).toHaveURL(/\/hpn-ticket-service\/$/);
+  await expect(page.getByRole('heading', { name: 'Dubbel Concert' })).toBeVisible();
+});
+
+test('privacy statement page is reachable via direct navigation under the base path', async ({ page }) => {
+  await page.goto('privacyverklaring');
+
+  await expect(page).toHaveURL(/\/hpn-ticket-service\/privacyverklaring$/);
+  await expect(page.getByRole('heading', { name: 'Privacyverklaring', level: 1 })).toBeVisible();
+
+  const backLink = page.getByRole('link', { name: '← Terug naar reserveren' });
+  await expect(backLink).toHaveAttribute('href', '/hpn-ticket-service/');
+
+  const footerLink = page.getByRole('link', { name: 'Naar reserveren', exact: true });
+  await expect(footerLink).toHaveAttribute('href', '/hpn-ticket-service/');
+});
+
 test('admin page requires Google login', async ({ page }) => {
   await page.goto('admin');
 

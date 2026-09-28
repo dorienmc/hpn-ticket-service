@@ -1,4 +1,5 @@
 import './styles.css';
+import { renderPrivacyPageMarkup } from './privacy.js';
 
 const app = document.querySelector('#app');
 
@@ -8,6 +9,7 @@ if (!app) {
 
 const appRoot = app;
 
+const appBaseHref = import.meta.env.BASE_URL;
 const baseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8787';
 const maxTickets = import.meta.env.VITE_MAX_TICKETS_PER_RESERVATION ?? '5';
 const reservationsEnabled = import.meta.env.VITE_RESERVATIONS_ENABLED !== 'false';
@@ -15,6 +17,7 @@ const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY ?? '';
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '';
 const path = window.location.pathname;
 const isAdminPath = path.replace(/\/+$/, '').endsWith('/admin');
+const isPrivacyPath = path.replace(/\/+$/, '').endsWith('/privacyverklaring');
 
 let recaptchaScriptPromise: Promise<void> | null = null;
 
@@ -85,6 +88,12 @@ function escapeHtml(value: string): string {
 }
 
 async function initApp() {
+  if (isPrivacyPath) {
+    document.title = 'Privacyverklaring – Ticket Service Half Past Nine';
+    appRoot.innerHTML = renderPrivacyPageMarkup(appBaseHref);
+    return;
+  }
+
   if (isAdminPath) {
     appRoot.innerHTML = `
       <main class="page page--admin">
@@ -577,7 +586,7 @@ async function initApp() {
             <div class="reservation-event-details">
               <p><span aria-hidden="true">▣</span> Zondag 8 november 2026</p>
               <p><span aria-hidden="true">◷</span> 15:00 uur</p>
-              <p><span aria-hidden="true">⌖</span> Twekkelerveld – Lambertus<br>Buddestraat 1, 7521 SB Enschede</p>
+              <p><span aria-hidden="true">⌖</span> Twekkelerpoort – Lambertus<br>Buddestraat 1, 7521 SB Enschede</p>
             </div>
           </div>
         </header>
@@ -612,7 +621,10 @@ async function initApp() {
           <p id="status" class="reservation-status" aria-live="polite">${reservationsEnabled ? '' : 'Online reserveren is binnenkort beschikbaar.'}</p>
         </section>
 
-        <footer class="reservation-footer">Samen maken we muziek!</footer>
+        <footer class="reservation-footer">
+          <span>Samen maken we muziek!</span>
+          <a href="${appBaseHref}privacyverklaring">Privacyverklaring</a>
+        </footer>
       </div>
     </main>
   `;
