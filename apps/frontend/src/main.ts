@@ -89,6 +89,7 @@ function escapeHtml(value: string): string {
 
 async function initApp() {
   if (isPrivacyPath) {
+    document.title = 'Privacyverklaring – Half Past Nine';
     appRoot.innerHTML = renderPrivacyPageMarkup(appBaseHref);
     return;
   }
