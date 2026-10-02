@@ -242,7 +242,7 @@ describe('Cloudflare Worker shell', () => {
     })));
 
     const result = await verifyGoogleIdToken({
-      GOOGLE_CLIENT_ID: 'expected-client-id',
+      GOOGLE_AUTH_CLIENT_ID: 'expected-client-id',
     } as never, 'token');
 
     expect(result).toBeNull();
@@ -256,7 +256,7 @@ describe('Cloudflare Worker shell', () => {
     })));
 
     const result = await verifyGoogleIdToken({
-      GOOGLE_CLIENT_ID: 'expected-client-id',
+      GOOGLE_AUTH_CLIENT_ID: 'expected-client-id',
       ADMIN_ALLOWED_EMAILS: 'admin@example.com, organiser@example.com',
     } as never, 'token');
 
@@ -272,7 +272,8 @@ describe('Cloudflare Worker shell', () => {
 
     const googleEnv = {
       FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
-      GOOGLE_CLIENT_ID: 'expected-client-id',
+      GOOGLE_AUTH_CLIENT_ID: 'expected-client-id',
+      GOOGLE_CLIENT_ID: 'mail-client-id',
       ADMIN_ALLOWED_EMAILS: 'admin@example.com',
       ADMIN_PASSWORD: 'super-secret',
       DB: createReservationDb(),
@@ -303,7 +304,7 @@ describe('Cloudflare Worker shell', () => {
       body: JSON.stringify({ credential: 'google-id-token' }),
     }, {
       FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
-      GOOGLE_CLIENT_ID: 'expected-client-id',
+      GOOGLE_AUTH_CLIENT_ID: 'expected-client-id',
     } as never);
 
     expect(response.status).toBe(500);
@@ -327,6 +328,7 @@ describe('Cloudflare Worker shell', () => {
       FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
       EMAIL_DELIVERY: 'gmail',
       GOOGLE_CLIENT_ID: 'client-id',
+      GOOGLE_AUTH_CLIENT_ID: 'sign-in-client-id',
       GOOGLE_CLIENT_SECRET: 'client-secret',
       GOOGLE_REFRESH_TOKEN: 'refresh-token',
       GOOGLE_SENDER_EMAIL: 'dorienmc@gmail.com',
@@ -335,6 +337,12 @@ describe('Cloudflare Worker shell', () => {
     expect(fetchMock).toHaveBeenCalledWith('https://oauth2.googleapis.com/token', expect.objectContaining({
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: 'client-id',
+        client_secret: 'client-secret',
+        refresh_token: 'refresh-token',
+        grant_type: 'refresh_token',
+      }),
     }));
     expect(fetchMock).toHaveBeenCalledWith('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', expect.objectContaining({
       method: 'POST',

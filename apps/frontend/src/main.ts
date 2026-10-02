@@ -14,7 +14,7 @@ const baseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8787';
 const maxTickets = import.meta.env.VITE_MAX_TICKETS_PER_RESERVATION ?? '5';
 const reservationsEnabled = import.meta.env.VITE_RESERVATIONS_ENABLED !== 'false';
 const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY ?? '';
-const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '';
+const googleClientId = import.meta.env.VITE_GOOGLE_AUTH_CLIENT_ID ?? '';
 const path = window.location.pathname;
 const isAdminPath = path.replace(/\/+$/, '').endsWith('/admin');
 const isPrivacyPath = path.replace(/\/+$/, '').endsWith('/privacyverklaring');

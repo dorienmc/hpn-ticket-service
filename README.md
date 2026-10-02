@@ -103,6 +103,8 @@ Production email delivery is enabled with `EMAIL_DELIVERY=gmail`. Store the Gmai
 	npx wrangler secret put GOOGLE_REFRESH_TOKEN
 	```
 
+These three credentials are used only for sending mail. Keep the existing refresh token paired with the client ID and client secret that issued it; admin Google Sign-In uses a separate `GOOGLE_AUTH_CLIENT_ID`.
+
 The Worker sends from the fixed `GOOGLE_SENDER_EMAIL` address (currently `dorienmc@gmail.com` in `apps/worker/wrangler.jsonc`), which must be an address authorized by the Gmail account.
 
 To verify the refresh token locally without deploying the Worker or sending an email, run:
@@ -133,14 +135,16 @@ When `ADMIN_PASSWORD` is set, the admin login page also accepts that password an
 - Copy the client ID and store it as a Cloudflare Worker secret:
 
 	```bash
-	npx wrangler secret put GOOGLE_CLIENT_ID
+	npx wrangler secret put GOOGLE_AUTH_CLIENT_ID
 	```
 
 - Manage the allowlist directly in `apps/worker/wrangler.jsonc` as the committed `ADMIN_ALLOWED_EMAILS` var, a comma-separated list of Gmail addresses allowed to sign in as admin, e.g. `"organiser@example.com, backup@example.com"`. Leave it empty to allow any Google account with a verified email. Redeploy the Worker after changing it.
 
 - The Worker signs Google session cookies with `ADMIN_PASSWORD`, so it must be set (see the password fallback above) even if you don't intend to use password login yourself.
 
-- Add the same client ID as a GitHub Pages variable (`GOOGLE_CLIENT_ID`, see step 6 below) so the frontend can render the Google Sign-In button.
+- Add the same sign-in client ID as a GitHub Actions repository variable (`GOOGLE_AUTH_CLIENT_ID`, see the table below) so the frontend can render the Google Sign-In button. This can be a different OAuth client from the one used for Gmail.
+
+- When upgrading an existing deployment, set `GOOGLE_AUTH_CLIENT_ID` in both Cloudflare and GitHub Actions, then redeploy both the Worker and Pages. Google Sign-In no longer uses `GOOGLE_CLIENT_ID`; leave the Gmail credentials unchanged.
 
 1. Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as GitHub Actions secrets. Run the **Deploy Cloudflare Worker** workflow manually. It validates the bundle, applies the D1 schema, and deploys the Worker.
 
@@ -152,7 +156,7 @@ When `ADMIN_PASSWORD` is set, the admin login page also accepts that password an
 	| --- | --- |
 	| `CLOUDFLARE_WORKER_URL` | Worker origin, without a trailing slash |
 	| `RECAPTCHA_SITE_KEY` | Public Google reCAPTCHA v3 site key |
-	| `GOOGLE_CLIENT_ID` | Google OAuth client ID, passed to the frontend as `VITE_GOOGLE_CLIENT_ID` |
+	| `GOOGLE_AUTH_CLIENT_ID` | Admin Google Sign-In OAuth client ID, passed to the frontend as `VITE_GOOGLE_AUTH_CLIENT_ID` |
 
 Rerun **Deploy GitHub Pages** after configuring the repository variables. Reservations are enabled for push-triggered deployments and by default for manual deployments; choose `reservations_enabled=false` in a manual run to temporarily disable the public reservation button.
 

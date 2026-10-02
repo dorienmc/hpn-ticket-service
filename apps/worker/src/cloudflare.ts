@@ -23,6 +23,7 @@ type Bindings = {
   RECAPTCHA_SECRET_KEY?: string;
   ADMIN_PASSWORD?: string;
   GOOGLE_CLIENT_ID?: string;
+  GOOGLE_AUTH_CLIENT_ID?: string;
   ADMIN_ALLOWED_EMAILS?: string;
   TOTAL_CAPACITY?: string;
   MAX_TICKETS_PER_RESERVATION?: string;
@@ -407,7 +408,7 @@ app.get('/api/auth/google', (context) => {
   return context.redirect(frontendUrl(context.env, 'admin'));
 });
 app.post('/api/auth/google', async (context) => {
-  if (!context.env.GOOGLE_CLIENT_ID) {
+  if (!context.env.GOOGLE_AUTH_CLIENT_ID) {
     return context.json({ error: 'Google sign-in is not configured' }, 404);
   }
   if (!context.env.ADMIN_PASSWORD) {
@@ -445,7 +446,7 @@ app.post('/api/auth/logout', (context) => {
     context.header('Set-Cookie', 'hpn_local_admin=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
     return context.body(null, 204);
   }
-  if (context.env.ADMIN_PASSWORD || context.env.GOOGLE_CLIENT_ID) {
+  if (context.env.ADMIN_PASSWORD || context.env.GOOGLE_AUTH_CLIENT_ID) {
     context.header('Set-Cookie', `${passwordSessionCookieName}=; ${adminSessionCookieAttributes(context.env)}; Max-Age=0`);
     context.header('Set-Cookie', `${googleSessionCookieName}=; ${adminSessionCookieAttributes(context.env)}; Max-Age=0`, { append: true });
     return context.body(null, 204);
