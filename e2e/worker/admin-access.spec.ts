@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
-const apiUrl = 'http://localhost:8789';
+const apiUrl = process.env.E2E_API_URL || 'http://localhost:8789';
 const frontendOrigin = 'http://localhost:5180';
 const ownerEmail = 'dorienmc@gmail.com';
 const emailLabel = 'Toegestane Google e-mailadressen (een per regel)';

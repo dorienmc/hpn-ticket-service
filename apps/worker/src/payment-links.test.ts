@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { config } from './config.js';
+import { readFileSync } from 'node:fs';
 import { paymentLinkFor } from './payment-links.js';
 
 const links = {
@@ -24,7 +24,8 @@ describe('paymentLinkFor', () => {
   });
 
   it('provides a distinct local fallback link for every ticket quantity', () => {
-    const fallbackLinks = [1, 2, 3, 4, 5].map((quantity) => paymentLinkFor(quantity, config.paymentLinks));
+    const { vars } = JSON.parse(readFileSync(new URL('../wrangler.local.jsonc', import.meta.url), 'utf8'));
+    const fallbackLinks = [1, 2, 3, 4, 5].map((quantity) => vars[`ING_PAYMENT_LINK_${quantity}`]);
 
     expect(fallbackLinks.every(Boolean)).toBe(true);
     expect(new Set(fallbackLinks).size).toBe(5);

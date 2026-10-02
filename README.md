@@ -26,7 +26,7 @@ This project is configured for Node 24 via the repository's `.nvmrc` file and th
 - [x] CI/CD pipeline (GitHub Actions: worker tests/build, frontend build, e2e)
 - [ ] Ticket QR code support
 - [x] Ticket check-in support (manual check-in via admin UI)
-- [ ] Use same logic for wrangler and express
+- [x] Use the same Worker backend for local development, testing and production
 - [ ] Split up main.ts into several pages
 
 ## Local development with Docker Compose
@@ -47,30 +47,47 @@ The backend runs the same Worker entrypoint used in production. Wrangler provide
 
 Mailpit remains useful because its HTTP Send API is compatible with the Worker runtime. Local Worker email requests go to Mailpit over HTTP; production requests use the Gmail API.
 
-### Express mock admin access
+### Manual development with Wrangler
 
-The alternative Express backend supports the same owner-managed allowlist using local SQLite. Authentication alone is mocked: when `MOCK_GOOGLE_LOGIN=true`, `/api/auth/google?email=...` signs in as that email without contacting Google. Never enable this mock on a publicly accessible server.
-
-To use Express instead of the Compose backend, stop the backend occupying port 8787 and start Express from the repository root:
+Express has been removed. Both manual commands and Docker Compose run the same Worker. From the repository root:
 
 ```bash
-MOCK_GOOGLE_LOGIN=true MOCK_GOOGLE_EMAIL=dorienmc@gmail.com npm --prefix apps/worker run dev
+npm --prefix apps/worker run dev
+# Alternatively: npm --prefix apps/worker start
 ```
 
-Use the frontend at `http://localhost:5173/hpn-ticket-service/admin`. The default mocked email is otherwise `admin@example.com`; set `MOCK_GOOGLE_EMAIL` to the owner to show **Toegang voor beheerders**. Additional mock users can sign in through `http://localhost:8787/api/auth/google?email=another@example.com` once allowed.
-
-Express uses the same fixed owner, email validation, initial `ADMIN_ALLOWED_EMAILS` fallback, persistent settings and audit records as the Worker. Each mock session identifies its own email; removing an email revokes access on the next request. Only the owner can manage access, and changes require the frontend origin. Mock sessions expire after 12 hours and do not survive an Express restart; the SQLite allowlist does survive restarts.
-
-Run the automated coverage:
+These commands apply local D1 migrations and start Wrangler in local mode using `apps/worker/wrangler.local.jsonc`. The API listens on port 8787. Run the frontend separately:
 
 ```bash
-npm --prefix apps/worker test -- src/admin-access.test.ts src/app.test.ts src/cloudflare.test.ts
-npm run test:e2e:express
+VITE_API_BASE_URL=http://localhost:8787 VITE_FRONTEND_URL=http://localhost:5173/hpn-ticket-service/ npm --prefix apps/frontend run dev -- --host localhost --port 5173
 ```
 
-The Express E2E suite starts its own API on port 8789 with an in-memory database and a frontend on port 5180 under `/hpn-ticket-service/`. It exercises the real UI and Express routes without calling Google or touching your normal local database. Install the root, Worker and frontend dependencies and Playwright Chromium before running it. These tests also run in CI.
+Use `http://localhost:5173/hpn-ticket-service/admin`. The local configuration enables `MOCK_GOOGLE_LOGIN` and defaults `MOCK_GOOGLE_EMAIL` to `dorienmc@gmail.com`, so the mock login link grants owner access. Additional users can sign in through `http://localhost:8787/api/auth/google?email=another@example.com` once allowed. Mock login is refused unless both the frontend and API URLs are HTTP loopback addresses; never expose the development server publicly.
 
-The backend settings can be configured with environment variables. `TOTAL_CAPACITY`, `MAX_TICKETS_PER_RESERVATION`, `TICKET_PRICE_CENTS`, and `RESERVATION_TTL_HOURS` come from the `vars` block in `apps/worker/wrangler.jsonc` (Wrangler loads the same file locally and in production); `FRONTEND_URL`, `EMAIL_DELIVERY`, `MAILPIT_API_URL`, `LOCAL_ADMIN_AUTH`, and the five `ING_PAYMENT_LINK_*` variables are passed as `--var` flags from `docker-compose.yml` for local development:
+The local signing password is an intentionally public development-only value, not a production credential. Production deploys use `wrangler.jsonc`, which does not enable mocked authentication. Local D1 persists allowlists and audit records. Signed sessions expire after twelve hours; logout records a D1 revocation, including for copies of the old cookie. Local mail delivery uses Mailpit at `http://localhost:8025`; run Mailpit for captured emails, or pass `--var EMAIL_DELIVERY:disabled` when email capture is unnecessary.
+
+Run all unit tests and the isolated Worker E2E suite:
+
+```bash
+npm test
+npm run test:e2e:worker
+```
+
+The isolated suite runs all existing browser scenarios plus admin access and migrated reservation API tests against Wrangler and real local D1. It uses ports 8789 (API), 5180 (frontend) and 8030 (test mail capture), creates temporary D1 state, and cleans it up afterwards. It does not touch your normal local database or call Google. Install the root, Worker and frontend dependencies and Playwright Chromium before running it. CI also runs the Docker-based E2E suite with Mailpit.
+
+Coverage formerly attached to Express is now exercised against the Worker:
+
+| Former tests | Worker coverage |
+| --- | --- |
+| Reservation creation, identifiers, quantity limits, amount, capacity | `e2e/worker/reservation-api.spec.ts` and `src/cloudflare.test.ts` |
+| Expiry, cancellation, extension, missing-order handling | `e2e/worker/reservation-api.spec.ts` |
+| Order listing, idempotent payment, unique tickets, single check-in, summary quantities | `e2e/worker/reservation-api.spec.ts` |
+| Owner permissions, normalized persisted access, audit, rollback on audit failure | `src/cloudflare.test.ts`, `e2e/worker/admin-access.spec.ts`, `e2e/worker/reservation-api.spec.ts` |
+| Revocation, invalid input/JSON, non-owner/forged sessions, origin checks, disabled mocks, empty initial allowlist | `src/cloudflare.test.ts` and `e2e/worker/admin-access.spec.ts` |
+| Expired sessions and logout invalidation | `src/cloudflare.test.ts` and `e2e/worker/reservation-api.spec.ts` |
+| Per-quantity payment links and local defaults | `src/payment-links.test.ts` |
+
+Local backend defaults come from the `vars` block in `apps/worker/wrangler.local.jsonc`; production uses `apps/worker/wrangler.jsonc`. Docker Compose overrides `FRONTEND_URL`, `EMAIL_DELIVERY`, `MAILPIT_API_URL`, and the five `ING_PAYMENT_LINK_*` variables with `--var` flags:
 
 | Variable | Local default | Purpose |
 | --- | ---: | --- |
@@ -165,7 +182,7 @@ When `ADMIN_PASSWORD` is set, the admin login page also accepts that password an
 
 - Sign in with Google as `dorienmc@gmail.com` to see **Toegang voor beheerders** in the admin UI. Enter one Google account email per line and save. The owner address must remain in the list. Only the owner signed in with Google can view or change this list; password login and other admins cannot manage access. Changes are stored in D1, recorded in `admin_access_audit`, and take effect on the next request, including for existing sessions. No redeployment is needed for later email changes. After the first save, the D1 list replaces `ADMIN_ALLOWED_EMAILS`.
 
-- On upgrading, run `npm run db:migrate:remote` (or the **Deploy Cloudflare Worker** workflow) to create the access settings and audit tables, then deploy both the Worker and Pages. Local Compose applies the same migrations on startup, but its default local-login bypass does not grant owner permissions; access management requires the owner's real Google session. The alternative Express mock backend supports testing owner access without Google (see **Express mock admin access** above).
+- On upgrading, run `npm run db:migrate:remote` (or the **Deploy Cloudflare Worker** workflow) to create the access settings, audit and session-revocation tables, then deploy both the Worker and Pages. Manual and Docker development apply the local migrations on startup and support mocked owner login without Google.
 
 - The Worker signs Google session cookies with `ADMIN_PASSWORD`, so it must be set (see the password fallback above) even if you don't intend to use password login yourself.
 
@@ -175,7 +192,7 @@ When `ADMIN_PASSWORD` is set, the admin login page also accepts that password an
 
 1. Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as GitHub Actions secrets. Run the **Deploy Cloudflare Worker** workflow manually. It validates the bundle, applies the D1 schema, and deploys the Worker.
 
-	`db:migrate:remote` runs `wrangler d1 execute --remote --file` for both `migrations/0001_initial.sql` and `migrations/0002_admin_access.sql` directly rather than `wrangler d1 migrations apply --remote`, because the latter currently fails with Cloudflare API error `7403` on this account. The schema statements use `IF NOT EXISTS`, so rerunning it is safe. If you add a new migration file, update this script (or switch back to `wrangler d1 migrations apply` if Cloudflare resolves the issue) so it gets applied too.
+	`db:migrate:remote` runs `wrangler d1 execute --remote --file` for `migrations/0001_initial.sql`, `migrations/0002_admin_access.sql` and `migrations/0003_admin_session_revocations.sql` directly rather than `wrangler d1 migrations apply --remote`, because the latter currently fails with Cloudflare API error `7403` on this account. The schema statements use `IF NOT EXISTS`, so rerunning it is safe. If you add a new migration file, update this script (or switch back to `wrangler d1 migrations apply` if Cloudflare resolves the issue) so it gets applied too.
 
 2. Verify the deployed `/api/health` endpoint. Then add these GitHub Actions repository variables:
 

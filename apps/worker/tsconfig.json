@@ -4,15 +4,14 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
-    "outDir": "dist",
+    "noEmit": true,
     "rootDir": "src",
     "strict": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "types": ["node", "vitest/globals"]
+    "types": ["@cloudflare/workers-types", "node", "vitest/globals"]
   },
-  "include": ["src/**/*"],
-  "exclude": ["src/cloudflare.ts", "src/cloudflare.test.ts"]
+  "include": ["src/**/*"]
 }

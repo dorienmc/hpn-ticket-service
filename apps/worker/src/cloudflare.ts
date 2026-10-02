@@ -20,7 +20,8 @@ type Bindings = {
   GOOGLE_REFRESH_TOKEN?: string;
   GOOGLE_SENDER_EMAIL?: string;
   MAILPIT_API_URL?: string;
-  LOCAL_ADMIN_AUTH?: string;
+  MOCK_GOOGLE_LOGIN?: string;
+  MOCK_GOOGLE_EMAIL?: string;
   RECAPTCHA_SECRET_KEY?: string;
   ADMIN_PASSWORD?: string;
   GOOGLE_CLIENT_ID?: string;
@@ -33,7 +34,6 @@ type Bindings = {
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
-const localAdminCookie = 'hpn_local_admin=authenticated';
 const passwordSessionCookieName = 'hpn_admin_password_session';
 const googleSessionCookieName = 'hpn_admin_google_session';
 const adminSessionTtlSeconds = 60 * 60 * 12;
@@ -78,9 +78,13 @@ function requestComesFromFrontend(headers: Headers, env: Bindings): boolean {
   return false;
 }
 
-function hasLocalAdminSession(env: Bindings, headers: Headers): boolean {
-  return env.LOCAL_ADMIN_AUTH === 'true' && (headers.get('Cookie') ?? '').split(';')
-    .some((cookie) => cookie.trim() === localAdminCookie);
+function isLoopbackUrl(value: string): boolean {
+  const url = new URL(value);
+  return url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+}
+
+function localGoogleMockEnabled(env: Bindings): boolean {
+  return env.MOCK_GOOGLE_LOGIN === 'true' && isLoopbackUrl(env.FRONTEND_URL);
 }
 
 function parseAllowedEmails(value: string | undefined): string[] {
@@ -124,26 +128,35 @@ function base64UrlDecode(value: string): string {
 async function createGoogleSessionCookie(env: Bindings, email: string): Promise<string> {
   const expiresAt = Math.floor(Date.now() / 1000) + adminSessionTtlSeconds;
   const encodedEmail = base64UrlEncode(email);
-  const signature = await signSessionValue(env.ADMIN_PASSWORD ?? '', `${expiresAt}.${encodedEmail}`);
-  return `${googleSessionCookieName}=${expiresAt}.${encodedEmail}.${signature}; ${adminSessionCookieAttributes(env)}; Max-Age=${adminSessionTtlSeconds}`;
+  const sessionValue = `${expiresAt}.${encodedEmail}.${crypto.randomUUID()}`;
+  const signature = await signSessionValue(env.ADMIN_PASSWORD ?? '', sessionValue);
+  return `${googleSessionCookieName}=${sessionValue}.${signature}; ${adminSessionCookieAttributes(env)}; Max-Age=${adminSessionTtlSeconds}`;
+}
+
+function googleSessionValue(headers: Headers): string | undefined {
+  return (headers.get('Cookie') ?? '').split(';').map((entry) => entry.trim())
+    .find((entry) => entry.startsWith(`${googleSessionCookieName}=`))?.slice(googleSessionCookieName.length + 1);
 }
 
 async function googleAdminSessionEmail(env: Bindings, headers: Headers): Promise<string | null> {
   const secret = env.ADMIN_PASSWORD;
   if (!secret) return null;
 
-  const cookie = (headers.get('Cookie') ?? '').split(';')
-    .map((entry) => entry.trim())
-    .find((entry) => entry.startsWith(`${googleSessionCookieName}=`));
-  if (!cookie) return null;
-
-  const [expiresAtRaw, encodedEmail, signature] = cookie.slice(googleSessionCookieName.length + 1).split('.');
+  const value = googleSessionValue(headers);
+  if (!value) return null;
+  const parts = value.split('.');
+  if (parts.length !== 3 && parts.length !== 4) return null;
+  const [expiresAtRaw, encodedEmail] = parts;
+  const signature = parts.at(-1);
   const expiresAt = Number(expiresAtRaw);
   if (!Number.isFinite(expiresAt) || expiresAt < Math.floor(Date.now() / 1000)) return null;
   if (!encodedEmail || !signature) return null;
 
-  const expectedSignature = await signSessionValue(secret, `${expiresAtRaw}.${encodedEmail}`);
+  const expectedSignature = await signSessionValue(secret, parts.slice(0, -1).join('.'));
   if (signature !== expectedSignature) return null;
+  const revoked = await env.DB.prepare('SELECT session_value FROM admin_session_revocations WHERE session_value = ?')
+    .bind(value).first();
+  if (revoked) return null;
 
   const email = base64UrlDecode(encodedEmail).toLowerCase();
   return (await allowedAdminEmails(env)).includes(email) ? email : null;
@@ -228,7 +241,7 @@ async function availableCapacity(env: Bindings): Promise<number> {
 }
 
 async function verifyRecaptcha(env: Bindings, token: string | undefined, remoteIp?: string): Promise<boolean> {
-  if (!env.RECAPTCHA_SECRET_KEY) return env.LOCAL_ADMIN_AUTH === 'true';
+  if (!env.RECAPTCHA_SECRET_KEY) return localGoogleMockEnabled(env);
   if (!token) return false;
 
   const body = new URLSearchParams({
@@ -381,8 +394,7 @@ app.use('/api/*', async (context, next) => cors({
 })(context, next));
 
 app.use('/api/admin/*', async (context, next) => {
-  const authenticated = hasLocalAdminSession(context.env, context.req.raw.headers)
-    || await hasPasswordAdminSession(context.env, context.req.raw.headers)
+  const authenticated = await hasPasswordAdminSession(context.env, context.req.raw.headers)
     || await hasGoogleAdminSession(context.env, context.req.raw.headers);
   if (!authenticated) {
     return context.json({ error: 'Admin authentication required' }, 401);
@@ -397,25 +409,30 @@ app.use('/api/admin/*', async (context, next) => {
 app.get('/api/health', (context) => context.json({ ok: true, status: 'healthy' }));
 app.get('/api/auth/session', async (context) => {
   const headers = context.req.raw.headers;
-  const localSession = hasLocalAdminSession(context.env, headers);
   const passwordSession = await hasPasswordAdminSession(context.env, headers);
   const googleEmail = await googleAdminSessionEmail(context.env, headers);
   const googleSession = googleEmail !== null;
 
   return context.json({
-    authenticated: localSession || passwordSession || googleSession,
+    authenticated: passwordSession || googleSession,
     ...(googleEmail === adminOwnerEmail ? { canManageAdminEmails: true } : {}),
-    provider: localSession
-      ? 'local'
-      : googleSession
+    provider: googleSession
         ? 'google'
         : (passwordSession || context.env.ADMIN_PASSWORD) ? 'password' : 'google',
   });
 });
-app.get('/api/auth/google', (context) => {
-  if (context.env.LOCAL_ADMIN_AUTH === 'true') {
-    context.header('Set-Cookie', `${localAdminCookie}; Path=/; HttpOnly; SameSite=Lax`);
+app.get('/api/auth/google', async (context) => {
+  if (!localGoogleMockEnabled(context.env) || !isLoopbackUrl(context.req.url)) {
+    return context.json({ error: 'Local Google login mock is disabled' }, 404);
   }
+  if (!context.env.ADMIN_PASSWORD) {
+    return context.json({ error: 'Admin password is not configured' }, 500);
+  }
+  const email = (context.req.query('email') ?? context.env.MOCK_GOOGLE_EMAIL ?? adminOwnerEmail).trim().toLowerCase();
+  if (!(await allowedAdminEmails(context.env)).includes(email)) {
+    return context.json({ error: 'This Google account is not allowed to access the admin area' }, 403);
+  }
+  context.header('Set-Cookie', await createGoogleSessionCookie(context.env, email));
   return context.redirect(frontendUrl(context.env, 'admin'));
 });
 app.post('/api/auth/google', async (context) => {
@@ -452,10 +469,15 @@ app.post('/api/auth/password', async (context) => {
   context.header('Set-Cookie', await createAdminSessionCookie(context.env));
   return context.json({ authenticated: true });
 });
-app.post('/api/auth/logout', (context) => {
-  if (context.env.LOCAL_ADMIN_AUTH === 'true') {
-    context.header('Set-Cookie', 'hpn_local_admin=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
-    return context.body(null, 204);
+app.post('/api/auth/logout', async (context) => {
+  const value = googleSessionValue(context.req.raw.headers);
+  if (value && await googleAdminSessionEmail(context.env, context.req.raw.headers)) {
+    await context.env.DB.batch([
+      context.env.DB.prepare('DELETE FROM admin_session_revocations WHERE expires_at < ?')
+        .bind(Math.floor(Date.now() / 1000)),
+      context.env.DB.prepare('INSERT OR IGNORE INTO admin_session_revocations (session_value, expires_at) VALUES (?, ?)')
+        .bind(value, Number(value.split('.')[0])),
+    ]);
   }
   if (context.env.ADMIN_PASSWORD || context.env.GOOGLE_AUTH_CLIENT_ID) {
     context.header('Set-Cookie', `${passwordSessionCookieName}=; ${adminSessionCookieAttributes(context.env)}; Max-Age=0`);
