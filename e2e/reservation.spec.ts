@@ -18,7 +18,12 @@ test('customer can navigate to and from the privacy statement page', async ({ pa
 
   await page.getByRole('link', { name: '← Terug naar reserveren' }).click();
   await expect(page).toHaveURL(/\/hpn-ticket-service\/$/);
-  await expect(page.getByRole('heading', { name: 'Dubbel Concert' })).toBeVisible();
+  await expect(page.getByRole("heading", {
+			name: "Half Past Nine & Diva Power",
+			level: 1,
+			exact: true,
+		}),
+	).toBeVisible();
 });
 
 test('privacy statement page is reachable via direct navigation under the base path', async ({ page }) => {
