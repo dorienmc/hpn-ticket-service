@@ -104,20 +104,30 @@ async function createAdminSessionCookie(env: Bindings): Promise<string> {
   return `${passwordSessionCookieName}=${expiresAt}.${signature}; ${adminSessionCookieAttributes(env)}; Max-Age=${adminSessionTtlSeconds}`;
 }
 
-async function hasPasswordAdminSession(env: Bindings, headers: Headers): Promise<boolean> {
+function passwordSessionValue(headers: Headers): string | undefined {
+  return (headers.get('Cookie') ?? '').split(';')
+    .map((entry) => entry.trim())
+    .find((entry) => entry.startsWith(`${passwordSessionCookieName}=`))
+    ?.slice(passwordSessionCookieName.length + 1);
+}
+
+async function validPasswordSession(env: Bindings, value: string): Promise<boolean> {
   if (!env.ADMIN_PASSWORD) return false;
 
-  const cookie = (headers.get('Cookie') ?? '').split(';')
-    .map((entry) => entry.trim())
-    .find((entry) => entry.startsWith(`${passwordSessionCookieName}=`));
-  if (!cookie) return false;
-
-  const [expiresAtRaw, signature] = cookie.slice(passwordSessionCookieName.length + 1).split('.');
+  const [expiresAtRaw, signature] = value.split('.');
   const expiresAt = Number(expiresAtRaw);
-  if (!Number.isFinite(expiresAt) || expiresAt < Math.floor(Date.now() / 1000)) return false;
+  if (!Number.isFinite(expiresAt) || expiresAt < Math.floor(Date.now() / 1000) || !signature) return false;
 
   const expectedSignature = await signSessionValue(env.ADMIN_PASSWORD, expiresAtRaw);
-  return signature === expectedSignature;
+  if (signature !== expectedSignature) return false;
+  const revoked = await env.DB.prepare('SELECT session_value FROM admin_session_revocations WHERE session_value = ?')
+    .bind(value).first();
+  return !revoked;
+}
+
+async function hasPasswordAdminSession(env: Bindings, headers: Headers): Promise<boolean> {
+  const value = passwordSessionValue(headers);
+  return value !== undefined && await validPasswordSession(env, value);
 }
 
 function base64UrlDecode(value: string): string {
@@ -139,7 +149,7 @@ function googleSessionValue(headers: Headers): string | undefined {
     .find((entry) => entry.startsWith(`${googleSessionCookieName}=`))?.slice(googleSessionCookieName.length + 1);
 }
 
-async function googleAdminSessionEmail(env: Bindings, headers: Headers): Promise<string | null> {
+async function googleSessionIdentity(env: Bindings, headers: Headers): Promise<string | null> {
   const secret = env.ADMIN_PASSWORD;
   if (!secret) return null;
 
@@ -159,7 +169,12 @@ async function googleAdminSessionEmail(env: Bindings, headers: Headers): Promise
     .bind(value).first();
   if (revoked) return null;
 
-  const email = base64UrlDecode(encodedEmail).toLowerCase();
+  return base64UrlDecode(encodedEmail).toLowerCase();
+}
+
+async function googleAdminSessionEmail(env: Bindings, headers: Headers): Promise<string | null> {
+  const email = await googleSessionIdentity(env, headers);
+  if (!email) return null;
   return (await allowedAdminEmails(env)).includes(email) ? email : null;
 }
 
@@ -471,13 +486,23 @@ app.post('/api/auth/password', async (context) => {
   return context.json({ authenticated: true });
 });
 app.post('/api/auth/logout', async (context) => {
-  const value = googleSessionValue(context.req.raw.headers);
-  if (value && await googleAdminSessionEmail(context.env, context.req.raw.headers)) {
+  const headers = context.req.raw.headers;
+  const sessionsToRevoke: { value: string; expiresAt: number }[] = [];
+  const passwordValue = passwordSessionValue(headers);
+  if (passwordValue && await validPasswordSession(context.env, passwordValue)) {
+    sessionsToRevoke.push({ value: passwordValue, expiresAt: Number(passwordValue.split('.')[0]) });
+  }
+  const googleValue = googleSessionValue(headers);
+  if (googleValue && await googleSessionIdentity(context.env, headers)) {
+    sessionsToRevoke.push({ value: googleValue, expiresAt: Number(googleValue.split('.')[0]) });
+  }
+  if (sessionsToRevoke.length > 0) {
     await context.env.DB.batch([
       context.env.DB.prepare('DELETE FROM admin_session_revocations WHERE expires_at < ?')
         .bind(Math.floor(Date.now() / 1000)),
-      context.env.DB.prepare('INSERT OR IGNORE INTO admin_session_revocations (session_value, expires_at) VALUES (?, ?)')
-        .bind(value, Number(value.split('.')[0])),
+      ...sessionsToRevoke.map(({ value, expiresAt }) =>
+        context.env.DB.prepare('INSERT OR IGNORE INTO admin_session_revocations (session_value, expires_at) VALUES (?, ?)')
+          .bind(value, expiresAt)),
     ]);
   }
   if (context.env.ADMIN_PASSWORD || context.env.GOOGLE_AUTH_CLIENT_ID) {

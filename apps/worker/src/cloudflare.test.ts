@@ -326,6 +326,10 @@ describe('Owner-managed admin access', () => {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential: 'id-token' }),
     }, bindings);
     expect(response.status).toBe(401);
+    const logout = await app.request('/api/auth/logout', { method: 'POST', headers: { Cookie: other } }, bindings);
+    expect(logout.status).toBe(204);
+    expect((await saveAccess(owner, ['dorienmc@gmail.com', 'admin@example.com'], bindings)).status).toBe(200);
+    expect((await app.request('/api/admin/orders', { headers: { Cookie: other } }, bindings)).status).toBe(401);
   });
 
   it('rejects empty, malformed, oversized and owner-removing lists without writing', async () => {
@@ -520,6 +524,30 @@ describe('Cloudflare Worker shell', () => {
         paymentUrl: `https://example.github.io/hpn-ticket-service/payment/${reservation.order_number}/${reservation.access_token}`,
       })],
     });
+  });
+
+  it('revokes copied password sessions on logout', async () => {
+    const passwordEnv = {
+      FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
+      ADMIN_PASSWORD: 'super-secret',
+      DB: createReservationDb(),
+    } as never;
+    const loginResponse = await app.request('/api/auth/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: 'super-secret' }),
+    }, passwordEnv);
+    const cookie = loginResponse.headers.get('set-cookie')!.split(';')[0];
+
+    const logout = await app.request('/api/auth/logout', {
+      method: 'POST',
+      headers: { Cookie: cookie },
+    }, passwordEnv);
+
+    expect(logout.status).toBe(204);
+    await expect((await app.request('/api/auth/session', { headers: { Cookie: cookie } }, passwordEnv)).json())
+      .resolves.toMatchObject({ authenticated: false });
+    expect((await app.request('/api/admin/orders', { headers: { Cookie: cookie } }, passwordEnv)).status).toBe(401);
   });
 
   it('rejects a Google credential with the wrong audience', async () => {
