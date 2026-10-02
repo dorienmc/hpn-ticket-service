@@ -168,6 +168,12 @@ To protect the public reservation form, create a Google reCAPTCHA v3 key pair fo
 
 When `ADMIN_PASSWORD` is set, the admin login page also accepts that password and issues a signed session cookie, independent of Cloudflare Access.
 
+Password sessions use the exact `expiry.nonce.signature` format, with a random
+nonce signed together with the expiry. Logout revokes the complete validated
+session value, while a new login gets a distinct session even within the same
+second. Older two-field password cookies are rejected; users must sign in again
+after deploying this change. No additional database migration is required.
+
 **Google Sign-In with an email allowlist:**
 
 - In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create an OAuth client of type **Web application**.

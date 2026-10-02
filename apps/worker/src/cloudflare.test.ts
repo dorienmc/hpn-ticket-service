@@ -527,6 +527,7 @@ describe('Cloudflare Worker shell', () => {
   });
 
   it('revokes copied password sessions on logout', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000);
     const passwordEnv = {
       FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
       ADMIN_PASSWORD: 'super-secret',
@@ -548,6 +549,51 @@ describe('Cloudflare Worker shell', () => {
     await expect((await app.request('/api/auth/session', { headers: { Cookie: cookie } }, passwordEnv)).json())
       .resolves.toMatchObject({ authenticated: false });
     expect((await app.request('/api/admin/orders', { headers: { Cookie: cookie } }, passwordEnv)).status).toBe(401);
+    expect((await app.request('/api/admin/orders', { headers: { Cookie: `${cookie}.x` } }, passwordEnv)).status).toBe(401);
+    const relogin = await app.request('/api/auth/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: 'super-secret' }),
+    }, passwordEnv);
+    expect(relogin.status).toBe(200);
+    const newCookie = relogin.headers.get('set-cookie')!.split(';')[0];
+    expect(newCookie).not.toBe(cookie);
+    expect(newCookie.split('.')[0]).toBe(cookie.split('.')[0]);
+    expect((await app.request('/api/admin/orders', { headers: { Cookie: newCookie } }, passwordEnv)).status).toBe(200);
+    expect((await app.request('/api/admin/orders', { headers: { Cookie: cookie } }, passwordEnv)).status).toBe(401);
+  });
+
+  it('rejects malformed password sessions and nonce tampering before querying revocations', async () => {
+    const db = createReservationDb();
+    const passwordEnv = {
+      FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
+      ADMIN_PASSWORD: 'super-secret',
+      DB: db,
+    };
+    const login = await app.request('/api/auth/password', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: passwordEnv.ADMIN_PASSWORD }),
+    }, passwordEnv);
+    const cookie = login.headers.get('set-cookie')!.split(';')[0];
+    const [expiry, nonce, signature] = cookie.slice(cookie.indexOf('=') + 1).split('.');
+    expect(nonce).toMatch(/^[0-9a-f-]{36}$/);
+    const prepare = vi.spyOn(db, 'prepare');
+    for (const value of [
+      `${expiry}.${signature}`,
+      `${expiry}.${nonce}.${signature}.x`,
+      `${expiry}.${nonce}.${signature}.`,
+      `${expiry}..${signature}`,
+      `${expiry}.invalid.${signature}`,
+      `${expiry}.${crypto.randomUUID()}.${signature}`,
+      `${expiry}.${nonce}.invalid`,
+    ]) {
+      const headers = { Cookie: `hpn_admin_password_session=${value}` };
+      prepare.mockClear();
+      expect((await app.request('/api/admin/orders', { headers }, passwordEnv)).status).toBe(401);
+      expect(prepare).not.toHaveBeenCalled();
+      expect((await app.request('/api/auth/logout', { method: 'POST', headers }, passwordEnv)).status).toBe(204);
+      expect(prepare).not.toHaveBeenCalled();
+    }
   });
 
   it('rejects a Google credential with the wrong audience', async () => {

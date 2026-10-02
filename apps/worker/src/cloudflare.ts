@@ -100,8 +100,9 @@ async function signSessionValue(secret: string, message: string): Promise<string
 
 async function createAdminSessionCookie(env: Bindings): Promise<string> {
   const expiresAt = Math.floor(Date.now() / 1000) + adminSessionTtlSeconds;
-  const signature = await signSessionValue(env.ADMIN_PASSWORD ?? '', String(expiresAt));
-  return `${passwordSessionCookieName}=${expiresAt}.${signature}; ${adminSessionCookieAttributes(env)}; Max-Age=${adminSessionTtlSeconds}`;
+  const sessionValue = `${expiresAt}.${crypto.randomUUID()}`;
+  const signature = await signSessionValue(env.ADMIN_PASSWORD ?? '', sessionValue);
+  return `${passwordSessionCookieName}=${sessionValue}.${signature}; ${adminSessionCookieAttributes(env)}; Max-Age=${adminSessionTtlSeconds}`;
 }
 
 function passwordSessionValue(headers: Headers): string | undefined {
@@ -114,11 +115,16 @@ function passwordSessionValue(headers: Headers): string | undefined {
 async function validPasswordSession(env: Bindings, value: string): Promise<boolean> {
   if (!env.ADMIN_PASSWORD) return false;
 
-  const [expiresAtRaw, signature] = value.split('.');
+  const parts = value.split('.');
+  if (parts.length !== 3) return false;
+  const [expiresAtRaw, nonce, signature] = parts;
+  if (!/^\d+$/.test(expiresAtRaw)
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(nonce)
+    || !/^[0-9a-f]{64}$/.test(signature)) return false;
   const expiresAt = Number(expiresAtRaw);
-  if (!Number.isFinite(expiresAt) || expiresAt < Math.floor(Date.now() / 1000) || !signature) return false;
+  if (!Number.isSafeInteger(expiresAt) || expiresAt < Math.floor(Date.now() / 1000)) return false;
 
-  const expectedSignature = await signSessionValue(env.ADMIN_PASSWORD, expiresAtRaw);
+  const expectedSignature = await signSessionValue(env.ADMIN_PASSWORD, `${expiresAtRaw}.${nonce}`);
   if (signature !== expectedSignature) return false;
   const revoked = await env.DB.prepare('SELECT session_value FROM admin_session_revocations WHERE session_value = ?')
     .bind(value).first();
