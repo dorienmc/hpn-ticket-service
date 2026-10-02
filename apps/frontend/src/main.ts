@@ -567,22 +567,12 @@ async function initApp() {
   }
 
   appRoot.innerHTML = `
-    <main class="reservation-preview reservation-preview--option-1">
-      <div class="style-preview" role="group" aria-label="Kies een stijl om te bekijken">
-        <span>Stijlvoorbeeld</span>
-        <button class="style-preview-button is-active" type="button" data-style="option-1" aria-pressed="true">
-          Optie 1 <span>Flyer</span>
-        </button>
-        <button class="style-preview-button" type="button" data-style="option-2" aria-pressed="false">
-          Optie 2 <span>Modern</span>
-        </button>
-      </div>
-
+    <main class="reservation-preview">
       <div class="reservation-layout">
         <header class="reservation-hero">
           <div class="reservation-hero-copy">
-            <h1 class="hero-title-option-1">Dubbel <span>Concert</span></h1>
-            <h1 class="hero-title-option-2">Half Past Nine <span>&amp; Diva Power</span></h1>
+            <p>Dubbelconcert</p>
+            <h1>Half Past Nine <span>&amp; Diva Power</span></h1>
             <div class="reservation-event-details">
               <p><span aria-hidden="true">▣</span> Zondag 8 november 2026</p>
               <p><span aria-hidden="true">◷</span> 15:00 uur</p>
@@ -613,12 +603,12 @@ async function initApp() {
               <input id="quantity" name="quantity" type="number" min="1" max="${maxTickets}" value="1" required />
             </label>
 
-            <button class="reservation-submit" type="submit" ${reservationsEnabled ? '' : 'disabled'}>
+            <button class="reservation-submit" type="submit" ${reservationsEnabled ? "" : "disabled"}>
               Tickets reserveren <span aria-hidden="true">→</span>
             </button>
           </form>
 
-          <p id="status" class="reservation-status" aria-live="polite">${reservationsEnabled ? '' : 'Online reserveren is binnenkort beschikbaar.'}</p>
+          <p id="status" class="reservation-status" aria-live="polite">${reservationsEnabled ? "" : "Online reserveren is binnenkort beschikbaar."}</p>
         </section>
 
         <footer class="reservation-footer">
@@ -631,22 +621,6 @@ async function initApp() {
 
   const form = document.querySelector<HTMLFormElement>('#reservation-form');
   const status = document.querySelector<HTMLParagraphElement>('#status');
-  const preview = document.querySelector<HTMLElement>('.reservation-preview');
-
-  preview?.querySelectorAll<HTMLButtonElement>('[data-style]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const style = button.dataset.style;
-      if (style !== 'option-1' && style !== 'option-2') return;
-
-      preview.classList.toggle('reservation-preview--option-1', style === 'option-1');
-      preview.classList.toggle('reservation-preview--option-2', style === 'option-2');
-      preview.querySelectorAll<HTMLButtonElement>('[data-style]').forEach((styleButton) => {
-        const isActive = styleButton === button;
-        styleButton.classList.toggle('is-active', isActive);
-        styleButton.setAttribute('aria-pressed', String(isActive));
-      });
-    });
-  });
 
   form?.addEventListener('submit', async (event) => {
     event.preventDefault();
