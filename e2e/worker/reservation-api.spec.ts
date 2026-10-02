@@ -124,7 +124,7 @@ test('extends from current expiry and rejects missing orders (former extension t
 test('persists admin audit records and atomically rolls back on audit failure (former SQLite tests)', async ({ request }) => {
   await login(request);
   const initial = await (await request.get(`${api}/api/admin/access`)).json();
-  const emails = [...initial.emails, 'audit-test@example.com'];
+  const emails = [...new Set([...initial.emails, 'audit-test@example.com'])];
   const save = () => request.post(`${api}/api/admin/access`, { headers: { Origin: origin }, data: { emails } });
   expect((await save()).ok()).toBeTruthy();
   const audit = executeSql('SELECT actor_email, emails FROM admin_access_audit ORDER BY id DESC LIMIT 1');

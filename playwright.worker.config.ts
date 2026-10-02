@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,7 +7,9 @@ const frontendUrl = 'http://localhost:5180/hpn-ticket-service/';
 const apiUrl = 'http://localhost:8789';
 process.env.E2E_API_URL = apiUrl;
 process.env.E2E_MAILPIT_URL = 'http://127.0.0.1:8030';
-process.env.E2E_STATE_DIR ??= mkdtempSync(join(tmpdir(), 'hpn-worker-e2e-'));
+const stateDirectoryRoot = process.env.E2E_STATE_DIR ?? tmpdir();
+mkdirSync(stateDirectoryRoot, { recursive: true });
+process.env.E2E_STATE_DIR = mkdtempSync(join(stateDirectoryRoot, 'hpn-worker-e2e-'));
 
 export default defineConfig({
   testDir: './e2e',
