@@ -29,6 +29,10 @@ body:has(.page--admin) {
   justify-items: stretch;
 }
 
+body:has(.page--admin) #app {
+  min-width: 0;
+}
+
 .page {
   width: min(100%, 640px);
   padding: 24px;
@@ -43,6 +47,8 @@ body:has(.page--admin) {
 }
 
 .page--admin .card {
+  width: 100%;
+  min-width: 0;
   max-width: none;
 }
 
@@ -466,6 +472,10 @@ select {
   align-items: center;
   gap: 12px;
   margin: 0;
+}
+
+.reservation-hero-copy > p,
+.reservation-event-details p {
   font-size: 0.95rem;
   font-weight: 600;
   line-height: 1.55;
@@ -873,13 +883,15 @@ select {
 }
 
 .reservation-preview .reservation-hero h1 {
-  font-size: clamp(4.6rem, 11vw, 8.5rem);
-  line-height: 0.84;
+  font-size: clamp(4.6rem, 10vw, 8.5rem);
+  letter-spacing: 0.03em;
 }
 
 .reservation-preview .reservation-hero h1 span {
   font-family: "Grobold", "Arial Black", sans-serif;
+  font-size: 0.9em;
   margin-top: 8px;
+  letter-spacing: -0.03em;
 }
 
 .reservation-preview .reservation-event-details {
@@ -949,7 +961,7 @@ select {
 
 @media (max-width: 480px) {
   .reservation-preview .reservation-hero h1 {
-    font-size: clamp(4rem, 18vw, 5.8rem);
+    font-size: clamp(3rem, 18vw, 5.8rem);
   }
 }
 

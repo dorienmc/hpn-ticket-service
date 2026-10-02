@@ -571,6 +571,7 @@ async function initApp() {
       <div class="reservation-layout">
         <header class="reservation-hero">
           <div class="reservation-hero-copy">
+            <p>Dubbelconcert</p>
             <h1>Half Past Nine <span>&amp; Diva Power</span></h1>
             <div class="reservation-event-details">
               <p><span aria-hidden="true">▣</span> Zondag 8 november 2026</p>
