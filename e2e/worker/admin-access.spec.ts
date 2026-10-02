@@ -202,7 +202,26 @@ test('configuration values are rendered as text, not HTML', async ({ page }) => 
   await expect(page.locator('#admin-config-values img')).toHaveCount(0);
 });
 
-test('configuration labels and long values do not overlap on desktop or mobile', async ({ page }) => {
+test('configuration loading failures are explicit and do not prevent saving access', async ({ page }) => {
+  await login(page);
+  await page.route('**/api/admin/access/config', (route) => route.fulfill({
+    status: 503,
+    json: { error: 'Configuration temporarily unavailable' },
+  }));
+  await openAccessPage(page);
+  await expect(page.locator('#admin-config-status')).toHaveText('Configuration temporarily unavailable');
+  await expect(page.locator('#admin-config-values')).toBeEmpty();
+  await expect(page.getByLabel(emailLabel)).toHaveValue(originalEmails.join('\n'));
+  await expect(page.getByRole('button', { name: 'Toegang opslaan' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Toegang opslaan' }).click();
+  await expect(page.getByText('Beheerderstoegang opgeslagen.', { exact: true })).toBeVisible();
+  await expect(page.locator('#admin-config-status')).toHaveText('Configuration temporarily unavailable');
+  const access = await page.request.get(`${apiUrl}/api/admin/access`);
+  expect(access.ok()).toBeTruthy();
+  expect((await access.json()).emails).toEqual(originalEmails);
+});
+
+test('configuration labels and long values fit at desktop, mobile and breakpoint widths', async ({ page }) => {
   await login(page);
   const longValue = `https://example.com/${'a'.repeat(300)}`;
   await page.route('**/api/admin/access/config', (route) => route.fulfill({
@@ -214,8 +233,15 @@ test('configuration labels and long values do not overlap on desktop or mobile',
     },
   }));
   await openAccessPage(page);
-  for (const width of [1280, 375]) {
+  await expect(page.locator('#admin-config-values > div')).toHaveCount(7);
+  for (const width of [1280, 721, 720, 375, 320]) {
     await page.setViewportSize({ width, height: 900 });
+    const section = page.locator('#admin-config');
+    expect(await section.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    const sectionBounds = await section.boundingBox();
+    if (!sectionBounds) throw new Error('Configuration section is not visible');
+    expect(sectionBounds.x).toBeGreaterThanOrEqual(0);
+    expect(sectionBounds.x + sectionBounds.width).toBeLessThanOrEqual(width + 1);
     for (const row of await page.locator('#admin-config-values > div').all()) {
       const label = await row.locator('dt').boundingBox();
       const value = await row.locator('dd').boundingBox();
