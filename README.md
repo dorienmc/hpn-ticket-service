@@ -20,11 +20,14 @@ This project is configured for Node 24 via the repository's `.nvmrc` file and th
 ## TODOs
 
 - [ ] Send mail after payment is confirmed?
-- [ ] Use HP9 styling in emails
-- [ ] Get things working in production
+- [x] Styling on ticket form and admin ui
+- [x] Use HP9 styling in emails
+- [x] Get things working in production
 - [x] CI/CD pipeline (GitHub Actions: worker tests/build, frontend build, e2e)
 - [ ] Ticket QR code support
 - [x] Ticket check-in support (manual check-in via admin UI)
+- [ ] Use same logic for wrangler and express
+- [ ] Split up main.ts into several pages
 
 ## Local development with Docker Compose
 
