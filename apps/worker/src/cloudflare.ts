@@ -1,6 +1,7 @@
 import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { createMiddleware } from 'hono/factory';
 import type { ReservationRecord, TicketRecord } from './types.js';
 import { MAX_SUPPORTED_TICKET_QUANTITY, paymentLinkFor } from './payment-links.js';
 import { adminOwnerEmail, normalizeAllowedAdminEmails, validateAdminEmails } from './admin-access.js';
@@ -605,11 +606,27 @@ app.get('/api/admin/summary', async (context) => {
   return context.json(summary);
 });
 
-app.use('/api/admin/access', async (context, next) => {
+const requireAdminOwner = createMiddleware<{ Bindings: Bindings }>(async (context, next) => {
   if (await googleAdminSessionEmail(context.env, context.req.raw.headers) !== adminOwnerEmail) {
     return context.json({ error: 'Only the owner signed in with Google can manage admin access' }, 403);
   }
   await next();
+});
+
+app.use('/api/admin/access', requireAdminOwner);
+app.use('/api/admin/access/*', requireAdminOwner);
+
+app.get('/api/admin/access/config', (context) => {
+  context.header('Cache-Control', 'no-store');
+  return context.json({
+    GOOGLE_CLIENT_ID: context.env.GOOGLE_CLIENT_ID || null,
+    GOOGLE_AUTH_CLIENT_ID: context.env.GOOGLE_AUTH_CLIENT_ID || null,
+    ING_PAYMENT_LINK_1: context.env.ING_PAYMENT_LINK_1 || null,
+    ING_PAYMENT_LINK_2: context.env.ING_PAYMENT_LINK_2 || null,
+    ING_PAYMENT_LINK_3: context.env.ING_PAYMENT_LINK_3 || null,
+    ING_PAYMENT_LINK_4: context.env.ING_PAYMENT_LINK_4 || null,
+    ING_PAYMENT_LINK_5: context.env.ING_PAYMENT_LINK_5 || null,
+  });
 });
 
 app.get('/api/admin/access', async (context) => {

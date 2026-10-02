@@ -361,6 +361,53 @@ select {
   color: #111827;
 }
 
+.config-list {
+  display: grid;
+  margin: 0;
+}
+
+.config-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 16rem) minmax(0, 1fr);
+  gap: 12px 24px;
+  padding: 14px 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.config-list > div:last-child {
+  border-bottom: 0;
+}
+
+.config-list dt,
+.config-list dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.config-list dt {
+  font-weight: 700;
+  color: #374151;
+}
+
+.config-list dd {
+  margin: 0;
+  color: #111827;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.875rem;
+}
+
+#admin-config {
+  margin-top: 24px;
+}
+
+@media (max-width: 720px) {
+  .config-list > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+}
+
 .payment-box {
   padding: 18px;
   border-radius: 12px;

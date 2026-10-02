@@ -132,6 +132,56 @@ describe('Local Worker mock login (replaces Express authentication tests)', () =
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('exposes only the requested configuration to the Google owner without caching', async () => {
+    const bindings = {
+      ...mockEnv(),
+      GOOGLE_CLIENT_ID: 'mail-client-id',
+      GOOGLE_AUTH_CLIENT_ID: 'login-client-id',
+      ING_PAYMENT_LINK_1: 'https://example.com/pay/1',
+      ING_PAYMENT_LINK_2: 'https://example.com/pay/2',
+      ING_PAYMENT_LINK_3: 'https://example.com/pay/3',
+      ING_PAYMENT_LINK_4: 'https://example.com/pay/4',
+      ING_PAYMENT_LINK_5: 'https://example.com/pay/5',
+      GOOGLE_CLIENT_SECRET: 'must-not-be-returned',
+      GOOGLE_REFRESH_TOKEN: 'must-not-be-returned',
+    };
+    const cookie = await mockLogin(bindings);
+    const response = await app.request('/api/admin/access/config', { headers: { Cookie: cookie } }, bindings);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(await response.json()).toEqual({
+      GOOGLE_CLIENT_ID: bindings.GOOGLE_CLIENT_ID,
+      GOOGLE_AUTH_CLIENT_ID: bindings.GOOGLE_AUTH_CLIENT_ID,
+      ING_PAYMENT_LINK_1: bindings.ING_PAYMENT_LINK_1,
+      ING_PAYMENT_LINK_2: bindings.ING_PAYMENT_LINK_2,
+      ING_PAYMENT_LINK_3: bindings.ING_PAYMENT_LINK_3,
+      ING_PAYMENT_LINK_4: bindings.ING_PAYMENT_LINK_4,
+      ING_PAYMENT_LINK_5: bindings.ING_PAYMENT_LINK_5,
+    });
+  });
+
+  it('returns null for unset configuration and denies anonymous, non-owner and password sessions', async () => {
+    const bindings = mockEnv();
+    const cookie = await mockLogin(bindings);
+    const response = await app.request('/api/admin/access/config', { headers: { Cookie: cookie } }, bindings);
+    expect(await response.json()).toEqual({
+      GOOGLE_CLIENT_ID: null, GOOGLE_AUTH_CLIENT_ID: null,
+      ING_PAYMENT_LINK_1: null, ING_PAYMENT_LINK_2: null, ING_PAYMENT_LINK_3: null,
+      ING_PAYMENT_LINK_4: null, ING_PAYMENT_LINK_5: null,
+    });
+    expect((await app.request('/api/admin/access/config', {}, bindings)).status).toBe(401);
+    const other = await mockLogin(bindings, 'admin@example.com');
+    expect((await app.request('/api/admin/access/config', { headers: { Cookie: other } }, bindings)).status).toBe(403);
+    const password = await app.request('/api/auth/password', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: bindings.ADMIN_PASSWORD }),
+    }, bindings);
+    expect(password.status).toBe(200);
+    expect((await app.request('/api/admin/access/config', {
+      headers: { Cookie: password.headers.get('set-cookie')!.split(';')[0] },
+    }, bindings)).status).toBe(403);
+  });
+
   it('rejects disabled mocks, non-loopback frontends and non-loopback API requests', async () => {
     for (const bindings of [
       { ...mockEnv(), MOCK_GOOGLE_LOGIN: 'false' },

@@ -1,5 +1,6 @@
 import './styles.css';
 import { renderPrivacyPageMarkup } from './privacy.js';
+import { initAdminAccessPage } from './admin-access.js';
 
 const app = document.querySelector('#app');
 
@@ -17,6 +18,7 @@ const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY ?? '';
 const googleClientId = import.meta.env.VITE_GOOGLE_AUTH_CLIENT_ID ?? '';
 const path = window.location.pathname;
 const isAdminPath = path.replace(/\/+$/, '').endsWith('/admin');
+const isAdminAccessPath = path.replace(/\/+$/, '').endsWith('/admin/access');
 const isPrivacyPath = path.replace(/\/+$/, '').endsWith('/privacyverklaring');
 
 let recaptchaScriptPromise: Promise<void> | null = null;
@@ -94,12 +96,13 @@ async function initApp() {
     return;
   }
 
-  if (isAdminPath) {
+  if (isAdminPath || isAdminAccessPath) {
+    if (isAdminAccessPath) document.title = 'Toegang voor beheerders – Ticket Service Half Past Nine';
     appRoot.innerHTML = `
       <main class="page page--admin">
         <section class="card reservation-card">
           <p class="eyebrow">Beheer</p>
-          <h1>Overzicht reserveringen</h1>
+          <h1>${isAdminAccessPath ? 'Toegang voor beheerders' : 'Overzicht reserveringen'}</h1>
           <div id="admin-summary" class="summary-grid"></div>
           <div id="admin-login" class="payment-box muted-box" hidden>
             <p>Log in om reserveringen te beheren.</p>
@@ -119,18 +122,10 @@ async function initApp() {
             <div class="admin-toolbar">
               <button id="admin-logout" class="admin-button secondary">Uitloggen</button>
             </div>
-            <section id="admin-access" class="payment-box muted-box" hidden>
-              <h2>Toegang voor beheerders</h2>
-              <p>De eigenaar blijft altijd toegang houden. Verwijderde beheerders verliezen direct toegang.</p>
-              <form id="admin-access-form" class="form">
-                <label>
-                  Toegestane Google e-mailadressen (een per regel)
-                  <textarea id="admin-access-emails" rows="5" required></textarea>
-                </label>
-                <button id="admin-access-save" type="submit">Toegang opslaan</button>
-              </form>
-              <p id="admin-access-status" class="status" aria-live="polite"></p>
-            </section>
+            ${isAdminAccessPath ? `
+            <div id="admin-access-page"></div>
+            <p><a class="admin-link" href="${appBaseHref}admin">Terug naar reserveringen</a></p>
+            ` : `
             <div class="admin-filters">
               <label>
                 Reserveringen zoeken
@@ -143,6 +138,8 @@ async function initApp() {
               <a class="tab-button" data-tab="ARCHIVE" href="?tab=ARCHIVE">Verlopen / geannuleerd</a>
             </div>
             <div id="admin-list" class="admin-list"></div>
+            <p><a id="admin-access-link" class="admin-link" href="${appBaseHref}admin/access" hidden>Toegang voor beheerders</a></p>
+            `}
           </div>
           <p id="admin-status" class="status" aria-live="polite"></p>
         </section>
@@ -230,51 +227,8 @@ async function initApp() {
 
       if (contentContainer) contentContainer.hidden = false;
 
-      if (session.canManageAdminEmails === true) {
-        const accessPanel = document.querySelector<HTMLElement>('#admin-access');
-        const accessForm = document.querySelector<HTMLFormElement>('#admin-access-form');
-        const accessEmails = document.querySelector<HTMLTextAreaElement>('#admin-access-emails');
-        const accessSave = document.querySelector<HTMLButtonElement>('#admin-access-save');
-        const accessStatus = document.querySelector<HTMLParagraphElement>('#admin-access-status');
-        if (accessPanel && accessForm && accessEmails && accessSave && accessStatus) {
-          accessPanel.hidden = false;
-          accessSave.disabled = true;
-          try {
-            const response = await fetch(`${baseUrl}/api/admin/access`, { credentials: 'include' });
-            const payload: { emails?: string[]; error?: string } = await response.json();
-            if (!response.ok || !payload.emails) {
-              throw new Error(payload.error ?? 'Beheerderstoegang kon niet worden geladen.');
-            }
-            accessEmails.value = payload.emails.join('\n');
-            accessSave.disabled = false;
-          } catch (error) {
-            accessStatus.textContent = error instanceof Error ? error.message : 'Beheerderstoegang kon niet worden geladen.';
-          }
-          accessForm.addEventListener('submit', async (event) => {
-            event.preventDefault();
-            accessSave.disabled = true;
-            accessStatus.textContent = '';
-            try {
-              const response = await fetch(`${baseUrl}/api/admin/access`, {
-                method: 'POST',
-                credentials: 'include',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ emails: accessEmails.value.split('\n').map((email) => email.trim()).filter(Boolean) }),
-              });
-              const payload: { emails?: string[]; error?: string } = await response.json();
-              if (!response.ok || !payload.emails) {
-                throw new Error(payload.error ?? 'Beheerderstoegang kon niet worden opgeslagen.');
-              }
-              accessEmails.value = payload.emails.join('\n');
-              accessStatus.textContent = 'Beheerderstoegang opgeslagen.';
-            } catch (error) {
-              accessStatus.textContent = error instanceof Error ? error.message : 'Beheerderstoegang kon niet worden opgeslagen.';
-            } finally {
-              accessSave.disabled = false;
-            }
-          });
-        }
-      }
+      const accessLink = document.querySelector<HTMLAnchorElement>('#admin-access-link');
+      if (accessLink) accessLink.hidden = session.canManageAdminEmails !== true;
 
       const ticketModalCloseButton = document.querySelector<HTMLButtonElement>('#ticket-modal [data-action="close-modal"]');
       ticketModalCloseButton?.addEventListener('click', () => {
@@ -292,6 +246,15 @@ async function initApp() {
         }
         window.location.reload();
       });
+
+      if (isAdminAccessPath) {
+        await initAdminAccessPage(
+          document.querySelector<HTMLElement>('#admin-access-page')!,
+          baseUrl,
+          session.canManageAdminEmails === true,
+        );
+        return;
+      }
 
       const summaryResponse = await fetch(`${baseUrl}/api/admin/summary`, { credentials: 'include' });
       const summary = await summaryResponse.json();
@@ -521,6 +484,9 @@ async function initApp() {
     } catch (error) {
       if (listContainer) {
         listContainer.innerHTML = `<p class="error-message">${error instanceof Error ? error.message : 'Beheergegevens konden niet worden geladen.'}</p>`;
+      } else {
+        const adminStatus = document.querySelector<HTMLParagraphElement>('#admin-status');
+        if (adminStatus) adminStatus.textContent = error instanceof Error ? error.message : 'Beheergegevens konden niet worden geladen.';
       }
     }
 
