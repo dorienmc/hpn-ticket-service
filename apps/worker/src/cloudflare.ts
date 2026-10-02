@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { ReservationRecord, TicketRecord } from './types.js';
 import { MAX_SUPPORTED_TICKET_QUANTITY, paymentLinkFor } from './payment-links.js';
+import { adminOwnerEmail, normalizeAllowedAdminEmails, validateAdminEmails } from './admin-access.js';
 
 type Bindings = {
   DB: D1Database;
@@ -36,6 +37,13 @@ const localAdminCookie = 'hpn_local_admin=authenticated';
 const passwordSessionCookieName = 'hpn_admin_password_session';
 const googleSessionCookieName = 'hpn_admin_google_session';
 const adminSessionTtlSeconds = 60 * 60 * 12;
+
+async function allowedAdminEmails(env: Bindings): Promise<string[]> {
+  const settings = await env.DB.prepare("SELECT emails FROM admin_access_settings WHERE id = 1")
+    .first<{ emails: string }>();
+  const emails: unknown = settings ? JSON.parse(settings.emails) : parseAllowedEmails(env.ADMIN_ALLOWED_EMAILS);
+  return normalizeAllowedAdminEmails(emails);
+}
 
 function frontendOrigin(env: Bindings): string {
   return new URL(env.FRONTEND_URL).origin;
@@ -120,43 +128,44 @@ async function createGoogleSessionCookie(env: Bindings, email: string): Promise<
   return `${googleSessionCookieName}=${expiresAt}.${encodedEmail}.${signature}; ${adminSessionCookieAttributes(env)}; Max-Age=${adminSessionTtlSeconds}`;
 }
 
-async function hasGoogleAdminSession(env: Bindings, headers: Headers): Promise<boolean> {
+async function googleAdminSessionEmail(env: Bindings, headers: Headers): Promise<string | null> {
   const secret = env.ADMIN_PASSWORD;
-  if (!secret) return false;
+  if (!secret) return null;
 
   const cookie = (headers.get('Cookie') ?? '').split(';')
     .map((entry) => entry.trim())
     .find((entry) => entry.startsWith(`${googleSessionCookieName}=`));
-  if (!cookie) return false;
+  if (!cookie) return null;
 
   const [expiresAtRaw, encodedEmail, signature] = cookie.slice(googleSessionCookieName.length + 1).split('.');
   const expiresAt = Number(expiresAtRaw);
-  if (!Number.isFinite(expiresAt) || expiresAt < Math.floor(Date.now() / 1000)) return false;
-  if (!encodedEmail || !signature) return false;
+  if (!Number.isFinite(expiresAt) || expiresAt < Math.floor(Date.now() / 1000)) return null;
+  if (!encodedEmail || !signature) return null;
 
   const expectedSignature = await signSessionValue(secret, `${expiresAtRaw}.${encodedEmail}`);
-  if (signature !== expectedSignature) return false;
+  if (signature !== expectedSignature) return null;
 
-  const allowedEmails = parseAllowedEmails(env.ADMIN_ALLOWED_EMAILS);
-  if (!allowedEmails.length) return true;
+  const email = base64UrlDecode(encodedEmail).toLowerCase();
+  return (await allowedAdminEmails(env)).includes(email) ? email : null;
+}
 
-  return allowedEmails.includes(base64UrlDecode(encodedEmail).toLowerCase());
+async function hasGoogleAdminSession(env: Bindings, headers: Headers): Promise<boolean> {
+  return await googleAdminSessionEmail(env, headers) !== null;
 }
 
 async function verifyGoogleIdToken(env: Bindings, credential: string): Promise<{ email: string } | null> {
-  if (!env.GOOGLE_CLIENT_ID) return null;
+  if (!env.GOOGLE_AUTH_CLIENT_ID) return null;
 
   const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
   if (!response.ok) return null;
 
   const payload = await response.json<{ aud?: string; email?: string; email_verified?: string | boolean }>();
-  if (payload.aud !== env.GOOGLE_CLIENT_ID) return null;
+  if (payload.aud !== env.GOOGLE_AUTH_CLIENT_ID) return null;
   if (!payload.email) return null;
   if (payload.email_verified !== true && payload.email_verified !== 'true') return null;
 
   const email = payload.email.toLowerCase();
-  const allowedEmails = parseAllowedEmails(env.ADMIN_ALLOWED_EMAILS);
-  if (allowedEmails.length && !allowedEmails.includes(email)) return null;
+  if (!(await allowedAdminEmails(env)).includes(email)) return null;
 
   return { email };
 }
@@ -390,10 +399,12 @@ app.get('/api/auth/session', async (context) => {
   const headers = context.req.raw.headers;
   const localSession = hasLocalAdminSession(context.env, headers);
   const passwordSession = await hasPasswordAdminSession(context.env, headers);
-  const googleSession = await hasGoogleAdminSession(context.env, headers);
+  const googleEmail = await googleAdminSessionEmail(context.env, headers);
+  const googleSession = googleEmail !== null;
 
   return context.json({
     authenticated: localSession || passwordSession || googleSession,
+    ...(googleEmail === adminOwnerEmail ? { canManageAdminEmails: true } : {}),
     provider: localSession
       ? 'local'
       : googleSession
@@ -570,6 +581,37 @@ app.get('/api/admin/summary', async (context) => {
     if (key in summary) summary[key] = Number(row.quantity);
   }
   return context.json(summary);
+});
+
+app.use('/api/admin/access', async (context, next) => {
+  if (await googleAdminSessionEmail(context.env, context.req.raw.headers) !== adminOwnerEmail) {
+    return context.json({ error: 'Only the owner signed in with Google can manage admin access' }, 403);
+  }
+  await next();
+});
+
+app.get('/api/admin/access', async (context) => {
+  return context.json({ ownerEmail: adminOwnerEmail, emails: await allowedAdminEmails(context.env) });
+});
+
+app.post('/api/admin/access', async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: 'Invalid JSON request' }, 400);
+  }
+  const result = validateAdminEmails(body);
+  if ('error' in result) return context.json(result, 400);
+  const { emails } = result;
+  const serialized = JSON.stringify(emails);
+  await context.env.DB.batch([
+    context.env.DB.prepare('INSERT INTO admin_access_settings (id, emails) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET emails = excluded.emails')
+      .bind(serialized),
+    context.env.DB.prepare('INSERT INTO admin_access_audit (actor_email, emails, created_at) VALUES (?, ?, ?)')
+      .bind(adminOwnerEmail, serialized, new Date().toISOString()),
+  ]);
+  return context.json({ ownerEmail: adminOwnerEmail, emails });
 });
 
 app.get('/api/admin/orders', async (context) => {

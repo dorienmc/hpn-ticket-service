@@ -119,6 +119,18 @@ async function initApp() {
             <div class="admin-toolbar">
               <button id="admin-logout" class="admin-button secondary">Uitloggen</button>
             </div>
+            <section id="admin-access" class="payment-box muted-box" hidden>
+              <h2>Toegang voor beheerders</h2>
+              <p>De eigenaar blijft altijd toegang houden. Verwijderde beheerders verliezen direct toegang.</p>
+              <form id="admin-access-form" class="form">
+                <label>
+                  Toegestane Google e-mailadressen (een per regel)
+                  <textarea id="admin-access-emails" rows="5" required></textarea>
+                </label>
+                <button id="admin-access-save" type="submit">Toegang opslaan</button>
+              </form>
+              <p id="admin-access-status" class="status" aria-live="polite"></p>
+            </section>
             <div class="admin-filters">
               <label>
                 Reserveringen zoeken
@@ -217,6 +229,52 @@ async function initApp() {
       }
 
       if (contentContainer) contentContainer.hidden = false;
+
+      if (session.canManageAdminEmails === true) {
+        const accessPanel = document.querySelector<HTMLElement>('#admin-access');
+        const accessForm = document.querySelector<HTMLFormElement>('#admin-access-form');
+        const accessEmails = document.querySelector<HTMLTextAreaElement>('#admin-access-emails');
+        const accessSave = document.querySelector<HTMLButtonElement>('#admin-access-save');
+        const accessStatus = document.querySelector<HTMLParagraphElement>('#admin-access-status');
+        if (accessPanel && accessForm && accessEmails && accessSave && accessStatus) {
+          accessPanel.hidden = false;
+          accessSave.disabled = true;
+          try {
+            const response = await fetch(`${baseUrl}/api/admin/access`, { credentials: 'include' });
+            const payload: { emails?: string[]; error?: string } = await response.json();
+            if (!response.ok || !payload.emails) {
+              throw new Error(payload.error ?? 'Beheerderstoegang kon niet worden geladen.');
+            }
+            accessEmails.value = payload.emails.join('\n');
+            accessSave.disabled = false;
+          } catch (error) {
+            accessStatus.textContent = error instanceof Error ? error.message : 'Beheerderstoegang kon niet worden geladen.';
+          }
+          accessForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            accessSave.disabled = true;
+            accessStatus.textContent = '';
+            try {
+              const response = await fetch(`${baseUrl}/api/admin/access`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ emails: accessEmails.value.split('\n').map((email) => email.trim()).filter(Boolean) }),
+              });
+              const payload: { emails?: string[]; error?: string } = await response.json();
+              if (!response.ok || !payload.emails) {
+                throw new Error(payload.error ?? 'Beheerderstoegang kon niet worden opgeslagen.');
+              }
+              accessEmails.value = payload.emails.join('\n');
+              accessStatus.textContent = 'Beheerderstoegang opgeslagen.';
+            } catch (error) {
+              accessStatus.textContent = error instanceof Error ? error.message : 'Beheerderstoegang kon niet worden opgeslagen.';
+            } finally {
+              accessSave.disabled = false;
+            }
+          });
+        }
+      }
 
       const ticketModalCloseButton = document.querySelector<HTMLButtonElement>('#ticket-modal [data-action="close-modal"]');
       ticketModalCloseButton?.addEventListener('click', () => {

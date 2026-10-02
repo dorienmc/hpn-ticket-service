@@ -73,6 +73,14 @@ jobs:
       - name: Run Playwright tests
         run: npm run test:e2e
 
+      - name: Install Express mock test dependencies
+        run: |
+          npm ci --prefix apps/worker
+          npm ci --prefix apps/frontend
+
+      - name: Run Express mock admin access end-to-end tests
+        run: npm run test:e2e:express
+
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4

@@ -9,7 +9,8 @@
     "dev": "docker compose up",
     "down": "docker compose down",
     "test": "npm --prefix apps/worker test",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:express": "playwright test --config playwright.express.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1"
