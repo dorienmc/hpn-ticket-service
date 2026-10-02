@@ -11,7 +11,7 @@ process.env.E2E_STATE_DIR ??= mkdtempSync(join(tmpdir(), 'hpn-worker-e2e-'));
 
 export default defineConfig({
   testDir: './e2e',
-  testMatch: ['reservation.spec.ts', 'worker/*.spec.ts'],
+  testMatch: ['**/reservation.spec.ts', '**/worker/*.spec.ts'],
   timeout: 15_000,
   fullyParallel: false,
   workers: 1,
