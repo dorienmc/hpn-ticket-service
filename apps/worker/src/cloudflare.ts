@@ -1,8 +1,10 @@
 import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { createMiddleware } from 'hono/factory';
 import type { ReservationRecord, TicketRecord } from './types.js';
 import { MAX_SUPPORTED_TICKET_QUANTITY, paymentLinkFor } from './payment-links.js';
+import { adminOwnerEmail, normalizeAllowedAdminEmails, validateAdminEmails } from './admin-access.js';
 
 type Bindings = {
   DB: D1Database;
@@ -19,10 +21,12 @@ type Bindings = {
   GOOGLE_REFRESH_TOKEN?: string;
   GOOGLE_SENDER_EMAIL?: string;
   MAILPIT_API_URL?: string;
-  LOCAL_ADMIN_AUTH?: string;
+  MOCK_GOOGLE_LOGIN?: string;
+  MOCK_GOOGLE_EMAIL?: string;
   RECAPTCHA_SECRET_KEY?: string;
   ADMIN_PASSWORD?: string;
   GOOGLE_CLIENT_ID?: string;
+  GOOGLE_AUTH_CLIENT_ID?: string;
   ADMIN_ALLOWED_EMAILS?: string;
   TOTAL_CAPACITY?: string;
   MAX_TICKETS_PER_RESERVATION?: string;
@@ -31,10 +35,16 @@ type Bindings = {
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
-const localAdminCookie = 'hpn_local_admin=authenticated';
 const passwordSessionCookieName = 'hpn_admin_password_session';
 const googleSessionCookieName = 'hpn_admin_google_session';
 const adminSessionTtlSeconds = 60 * 60 * 12;
+
+async function allowedAdminEmails(env: Bindings): Promise<string[]> {
+  const settings = await env.DB.prepare("SELECT emails FROM admin_access_settings WHERE id = 1")
+    .first<{ emails: string }>();
+  const emails: unknown = settings ? JSON.parse(settings.emails) : parseAllowedEmails(env.ADMIN_ALLOWED_EMAILS);
+  return normalizeAllowedAdminEmails(emails);
+}
 
 function frontendOrigin(env: Bindings): string {
   return new URL(env.FRONTEND_URL).origin;
@@ -69,9 +79,13 @@ function requestComesFromFrontend(headers: Headers, env: Bindings): boolean {
   return false;
 }
 
-function hasLocalAdminSession(env: Bindings, headers: Headers): boolean {
-  return env.LOCAL_ADMIN_AUTH === 'true' && (headers.get('Cookie') ?? '').split(';')
-    .some((cookie) => cookie.trim() === localAdminCookie);
+function isLoopbackUrl(value: string): boolean {
+  const url = new URL(value);
+  return url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+}
+
+function localGoogleMockEnabled(env: Bindings): boolean {
+  return env.MOCK_GOOGLE_LOGIN === 'true' && isLoopbackUrl(env.FRONTEND_URL);
 }
 
 function parseAllowedEmails(value: string | undefined): string[] {
@@ -86,24 +100,40 @@ async function signSessionValue(secret: string, message: string): Promise<string
 
 async function createAdminSessionCookie(env: Bindings): Promise<string> {
   const expiresAt = Math.floor(Date.now() / 1000) + adminSessionTtlSeconds;
-  const signature = await signSessionValue(env.ADMIN_PASSWORD ?? '', String(expiresAt));
-  return `${passwordSessionCookieName}=${expiresAt}.${signature}; ${adminSessionCookieAttributes(env)}; Max-Age=${adminSessionTtlSeconds}`;
+  const sessionValue = `${expiresAt}.${crypto.randomUUID()}`;
+  const signature = await signSessionValue(env.ADMIN_PASSWORD ?? '', sessionValue);
+  return `${passwordSessionCookieName}=${sessionValue}.${signature}; ${adminSessionCookieAttributes(env)}; Max-Age=${adminSessionTtlSeconds}`;
+}
+
+function passwordSessionValue(headers: Headers): string | undefined {
+  return (headers.get('Cookie') ?? '').split(';')
+    .map((entry) => entry.trim())
+    .find((entry) => entry.startsWith(`${passwordSessionCookieName}=`))
+    ?.slice(passwordSessionCookieName.length + 1);
+}
+
+async function validPasswordSession(env: Bindings, value: string): Promise<boolean> {
+  if (!env.ADMIN_PASSWORD) return false;
+
+  const parts = value.split('.');
+  if (parts.length !== 3) return false;
+  const [expiresAtRaw, nonce, signature] = parts;
+  if (!/^\d+$/.test(expiresAtRaw)
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(nonce)
+    || !/^[0-9a-f]{64}$/.test(signature)) return false;
+  const expiresAt = Number(expiresAtRaw);
+  if (!Number.isSafeInteger(expiresAt) || expiresAt < Math.floor(Date.now() / 1000)) return false;
+
+  const expectedSignature = await signSessionValue(env.ADMIN_PASSWORD, `${expiresAtRaw}.${nonce}`);
+  if (signature !== expectedSignature) return false;
+  const revoked = await env.DB.prepare('SELECT session_value FROM admin_session_revocations WHERE session_value = ?')
+    .bind(value).first();
+  return !revoked;
 }
 
 async function hasPasswordAdminSession(env: Bindings, headers: Headers): Promise<boolean> {
-  if (!env.ADMIN_PASSWORD) return false;
-
-  const cookie = (headers.get('Cookie') ?? '').split(';')
-    .map((entry) => entry.trim())
-    .find((entry) => entry.startsWith(`${passwordSessionCookieName}=`));
-  if (!cookie) return false;
-
-  const [expiresAtRaw, signature] = cookie.slice(passwordSessionCookieName.length + 1).split('.');
-  const expiresAt = Number(expiresAtRaw);
-  if (!Number.isFinite(expiresAt) || expiresAt < Math.floor(Date.now() / 1000)) return false;
-
-  const expectedSignature = await signSessionValue(env.ADMIN_PASSWORD, expiresAtRaw);
-  return signature === expectedSignature;
+  const value = passwordSessionValue(headers);
+  return value !== undefined && await validPasswordSession(env, value);
 }
 
 function base64UrlDecode(value: string): string {
@@ -115,47 +145,62 @@ function base64UrlDecode(value: string): string {
 async function createGoogleSessionCookie(env: Bindings, email: string): Promise<string> {
   const expiresAt = Math.floor(Date.now() / 1000) + adminSessionTtlSeconds;
   const encodedEmail = base64UrlEncode(email);
-  const signature = await signSessionValue(env.ADMIN_PASSWORD ?? '', `${expiresAt}.${encodedEmail}`);
-  return `${googleSessionCookieName}=${expiresAt}.${encodedEmail}.${signature}; ${adminSessionCookieAttributes(env)}; Max-Age=${adminSessionTtlSeconds}`;
+  const sessionValue = `${expiresAt}.${encodedEmail}.${crypto.randomUUID()}`;
+  const signature = await signSessionValue(env.ADMIN_PASSWORD ?? '', sessionValue);
+  return `${googleSessionCookieName}=${sessionValue}.${signature}; ${adminSessionCookieAttributes(env)}; Max-Age=${adminSessionTtlSeconds}`;
+}
+
+function googleSessionValue(headers: Headers): string | undefined {
+  return (headers.get('Cookie') ?? '').split(';').map((entry) => entry.trim())
+    .find((entry) => entry.startsWith(`${googleSessionCookieName}=`))?.slice(googleSessionCookieName.length + 1);
+}
+
+async function googleSessionIdentity(env: Bindings, headers: Headers): Promise<string | null> {
+  const secret = env.ADMIN_PASSWORD;
+  if (!secret) return null;
+
+  const value = googleSessionValue(headers);
+  if (!value) return null;
+  const parts = value.split('.');
+  if (parts.length !== 3 && parts.length !== 4) return null;
+  const [expiresAtRaw, encodedEmail] = parts;
+  const signature = parts.at(-1);
+  const expiresAt = Number(expiresAtRaw);
+  if (!Number.isFinite(expiresAt) || expiresAt < Math.floor(Date.now() / 1000)) return null;
+  if (!encodedEmail || !signature) return null;
+
+  const expectedSignature = await signSessionValue(secret, parts.slice(0, -1).join('.'));
+  if (signature !== expectedSignature) return null;
+  const revoked = await env.DB.prepare('SELECT session_value FROM admin_session_revocations WHERE session_value = ?')
+    .bind(value).first();
+  if (revoked) return null;
+
+  return base64UrlDecode(encodedEmail).toLowerCase();
+}
+
+async function googleAdminSessionEmail(env: Bindings, headers: Headers): Promise<string | null> {
+  const email = await googleSessionIdentity(env, headers);
+  if (!email) return null;
+  return (await allowedAdminEmails(env)).includes(email) ? email : null;
 }
 
 async function hasGoogleAdminSession(env: Bindings, headers: Headers): Promise<boolean> {
-  const secret = env.ADMIN_PASSWORD;
-  if (!secret) return false;
-
-  const cookie = (headers.get('Cookie') ?? '').split(';')
-    .map((entry) => entry.trim())
-    .find((entry) => entry.startsWith(`${googleSessionCookieName}=`));
-  if (!cookie) return false;
-
-  const [expiresAtRaw, encodedEmail, signature] = cookie.slice(googleSessionCookieName.length + 1).split('.');
-  const expiresAt = Number(expiresAtRaw);
-  if (!Number.isFinite(expiresAt) || expiresAt < Math.floor(Date.now() / 1000)) return false;
-  if (!encodedEmail || !signature) return false;
-
-  const expectedSignature = await signSessionValue(secret, `${expiresAtRaw}.${encodedEmail}`);
-  if (signature !== expectedSignature) return false;
-
-  const allowedEmails = parseAllowedEmails(env.ADMIN_ALLOWED_EMAILS);
-  if (!allowedEmails.length) return true;
-
-  return allowedEmails.includes(base64UrlDecode(encodedEmail).toLowerCase());
+  return await googleAdminSessionEmail(env, headers) !== null;
 }
 
 async function verifyGoogleIdToken(env: Bindings, credential: string): Promise<{ email: string } | null> {
-  if (!env.GOOGLE_CLIENT_ID) return null;
+  if (!env.GOOGLE_AUTH_CLIENT_ID) return null;
 
   const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
   if (!response.ok) return null;
 
   const payload = await response.json<{ aud?: string; email?: string; email_verified?: string | boolean }>();
-  if (payload.aud !== env.GOOGLE_CLIENT_ID) return null;
+  if (payload.aud !== env.GOOGLE_AUTH_CLIENT_ID) return null;
   if (!payload.email) return null;
   if (payload.email_verified !== true && payload.email_verified !== 'true') return null;
 
   const email = payload.email.toLowerCase();
-  const allowedEmails = parseAllowedEmails(env.ADMIN_ALLOWED_EMAILS);
-  if (allowedEmails.length && !allowedEmails.includes(email)) return null;
+  if (!(await allowedAdminEmails(env)).includes(email)) return null;
 
   return { email };
 }
@@ -218,7 +263,7 @@ async function availableCapacity(env: Bindings): Promise<number> {
 }
 
 async function verifyRecaptcha(env: Bindings, token: string | undefined, remoteIp?: string): Promise<boolean> {
-  if (!env.RECAPTCHA_SECRET_KEY) return env.LOCAL_ADMIN_AUTH === 'true';
+  if (!env.RECAPTCHA_SECRET_KEY) return localGoogleMockEnabled(env);
   if (!token) return false;
 
   const body = new URLSearchParams({
@@ -371,8 +416,7 @@ app.use('/api/*', async (context, next) => cors({
 })(context, next));
 
 app.use('/api/admin/*', async (context, next) => {
-  const authenticated = hasLocalAdminSession(context.env, context.req.raw.headers)
-    || await hasPasswordAdminSession(context.env, context.req.raw.headers)
+  const authenticated = await hasPasswordAdminSession(context.env, context.req.raw.headers)
     || await hasGoogleAdminSession(context.env, context.req.raw.headers);
   if (!authenticated) {
     return context.json({ error: 'Admin authentication required' }, 401);
@@ -387,27 +431,34 @@ app.use('/api/admin/*', async (context, next) => {
 app.get('/api/health', (context) => context.json({ ok: true, status: 'healthy' }));
 app.get('/api/auth/session', async (context) => {
   const headers = context.req.raw.headers;
-  const localSession = hasLocalAdminSession(context.env, headers);
   const passwordSession = await hasPasswordAdminSession(context.env, headers);
-  const googleSession = await hasGoogleAdminSession(context.env, headers);
+  const googleEmail = await googleAdminSessionEmail(context.env, headers);
+  const googleSession = googleEmail !== null;
 
   return context.json({
-    authenticated: localSession || passwordSession || googleSession,
-    provider: localSession
-      ? 'local'
-      : googleSession
+    authenticated: passwordSession || googleSession,
+    ...(googleEmail === adminOwnerEmail ? { canManageAdminEmails: true } : {}),
+    provider: googleSession
         ? 'google'
         : (passwordSession || context.env.ADMIN_PASSWORD) ? 'password' : 'google',
   });
 });
-app.get('/api/auth/google', (context) => {
-  if (context.env.LOCAL_ADMIN_AUTH === 'true') {
-    context.header('Set-Cookie', `${localAdminCookie}; Path=/; HttpOnly; SameSite=Lax`);
+app.get('/api/auth/google', async (context) => {
+  if (!localGoogleMockEnabled(context.env) || !isLoopbackUrl(context.req.url)) {
+    return context.json({ error: 'Local Google login mock is disabled' }, 404);
   }
+  if (!context.env.ADMIN_PASSWORD) {
+    return context.json({ error: 'Admin password is not configured' }, 500);
+  }
+  const email = (context.req.query('email') ?? context.env.MOCK_GOOGLE_EMAIL ?? adminOwnerEmail).trim().toLowerCase();
+  if (!(await allowedAdminEmails(context.env)).includes(email)) {
+    return context.json({ error: 'This Google account is not allowed to access the admin area' }, 403);
+  }
+  context.header('Set-Cookie', await createGoogleSessionCookie(context.env, email));
   return context.redirect(frontendUrl(context.env, 'admin'));
 });
 app.post('/api/auth/google', async (context) => {
-  if (!context.env.GOOGLE_CLIENT_ID) {
+  if (!context.env.GOOGLE_AUTH_CLIENT_ID) {
     return context.json({ error: 'Google sign-in is not configured' }, 404);
   }
   if (!context.env.ADMIN_PASSWORD) {
@@ -440,12 +491,30 @@ app.post('/api/auth/password', async (context) => {
   context.header('Set-Cookie', await createAdminSessionCookie(context.env));
   return context.json({ authenticated: true });
 });
-app.post('/api/auth/logout', (context) => {
-  if (context.env.LOCAL_ADMIN_AUTH === 'true') {
-    context.header('Set-Cookie', 'hpn_local_admin=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
-    return context.body(null, 204);
+app.post('/api/auth/logout', async (context) => {
+  if (!requestComesFromFrontend(context.req.raw.headers, context.env)) {
+    return context.json({ error: 'Cross-site admin requests are not allowed' }, 403);
   }
-  if (context.env.ADMIN_PASSWORD || context.env.GOOGLE_CLIENT_ID) {
+  const headers = context.req.raw.headers;
+  const sessionsToRevoke: { value: string; expiresAt: number }[] = [];
+  const passwordValue = passwordSessionValue(headers);
+  if (passwordValue && await validPasswordSession(context.env, passwordValue)) {
+    sessionsToRevoke.push({ value: passwordValue, expiresAt: Number(passwordValue.split('.')[0]) });
+  }
+  const googleValue = googleSessionValue(headers);
+  if (googleValue && await googleSessionIdentity(context.env, headers)) {
+    sessionsToRevoke.push({ value: googleValue, expiresAt: Number(googleValue.split('.')[0]) });
+  }
+  if (sessionsToRevoke.length > 0) {
+    await context.env.DB.batch([
+      context.env.DB.prepare('DELETE FROM admin_session_revocations WHERE expires_at < ?')
+        .bind(Math.floor(Date.now() / 1000)),
+      ...sessionsToRevoke.map(({ value, expiresAt }) =>
+        context.env.DB.prepare('INSERT OR IGNORE INTO admin_session_revocations (session_value, expires_at) VALUES (?, ?)')
+          .bind(value, expiresAt)),
+    ]);
+  }
+  if (context.env.ADMIN_PASSWORD || context.env.GOOGLE_AUTH_CLIENT_ID) {
     context.header('Set-Cookie', `${passwordSessionCookieName}=; ${adminSessionCookieAttributes(context.env)}; Max-Age=0`);
     context.header('Set-Cookie', `${googleSessionCookieName}=; ${adminSessionCookieAttributes(context.env)}; Max-Age=0`, { append: true });
     return context.body(null, 204);
@@ -569,6 +638,53 @@ app.get('/api/admin/summary', async (context) => {
     if (key in summary) summary[key] = Number(row.quantity);
   }
   return context.json(summary);
+});
+
+const requireAdminOwner = createMiddleware<{ Bindings: Bindings }>(async (context, next) => {
+  if (await googleAdminSessionEmail(context.env, context.req.raw.headers) !== adminOwnerEmail) {
+    return context.json({ error: 'Only the owner signed in with Google can manage admin access' }, 403);
+  }
+  await next();
+});
+
+app.use('/api/admin/access', requireAdminOwner);
+app.use('/api/admin/access/*', requireAdminOwner);
+
+app.get('/api/admin/access/config', (context) => {
+  context.header('Cache-Control', 'no-store');
+  return context.json({
+    GOOGLE_CLIENT_ID: context.env.GOOGLE_CLIENT_ID || null,
+    GOOGLE_AUTH_CLIENT_ID: context.env.GOOGLE_AUTH_CLIENT_ID || null,
+    ING_PAYMENT_LINK_1: context.env.ING_PAYMENT_LINK_1 || null,
+    ING_PAYMENT_LINK_2: context.env.ING_PAYMENT_LINK_2 || null,
+    ING_PAYMENT_LINK_3: context.env.ING_PAYMENT_LINK_3 || null,
+    ING_PAYMENT_LINK_4: context.env.ING_PAYMENT_LINK_4 || null,
+    ING_PAYMENT_LINK_5: context.env.ING_PAYMENT_LINK_5 || null,
+  });
+});
+
+app.get('/api/admin/access', async (context) => {
+  return context.json({ ownerEmail: adminOwnerEmail, emails: await allowedAdminEmails(context.env) });
+});
+
+app.post('/api/admin/access', async (context) => {
+  let body: unknown;
+  try {
+    body = await context.req.json();
+  } catch {
+    return context.json({ error: 'Invalid JSON request' }, 400);
+  }
+  const result = validateAdminEmails(body);
+  if ('error' in result) return context.json(result, 400);
+  const { emails } = result;
+  const serialized = JSON.stringify(emails);
+  await context.env.DB.batch([
+    context.env.DB.prepare('INSERT INTO admin_access_settings (id, emails) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET emails = excluded.emails')
+      .bind(serialized),
+    context.env.DB.prepare('INSERT INTO admin_access_audit (actor_email, emails, created_at) VALUES (?, ?, ?)')
+      .bind(adminOwnerEmail, serialized, new Date().toISOString()),
+  ]);
+  return context.json({ ownerEmail: adminOwnerEmail, emails });
 });
 
 app.get('/api/admin/orders', async (context) => {

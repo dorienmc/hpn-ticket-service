@@ -64,7 +64,7 @@ jobs:
           VITE_FRONTEND_URL: ${{ steps.frontend-url.outputs.value }}
           VITE_RESERVATIONS_ENABLED: ${{ github.event_name != 'workflow_dispatch' || inputs.reservations_enabled == 'true' }}
           VITE_RECAPTCHA_SITE_KEY: ${{ vars.RECAPTCHA_SITE_KEY }}
-          VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          VITE_GOOGLE_AUTH_CLIENT_ID: ${{ vars.GOOGLE_AUTH_CLIENT_ID }}
         run: npm run build
 
       - name: Configure SPA fallback

@@ -5,7 +5,7 @@ function uniqueEmail(): string {
 }
 
 async function loginAsMockGoogleAdmin(page: import('@playwright/test').Page): Promise<void> {
-  await page.goto('http://localhost:8787/api/auth/google');
+  await page.goto(`${process.env.E2E_API_URL || 'http://localhost:8787'}/api/auth/google`);
   await expect(page).toHaveURL(/\/hpn-ticket-service\/admin\/?$/);
 }
 
@@ -92,7 +92,7 @@ test('customer can create a reservation and view its private status page', async
   await expect(page.locator('.ticket-list')).toHaveCount(0);
 
   await expect.poll(async () => {
-    const response = await page.request.get('http://localhost:8025/api/v1/search?query=to:e2e-');
+    const response = await page.request.get(`${process.env.E2E_MAILPIT_URL || 'http://localhost:8025'}/api/v1/search?query=to:e2e-`);
     const mailbox = await response.json();
     return mailbox.messages_count;
   }).toBeGreaterThan(0);

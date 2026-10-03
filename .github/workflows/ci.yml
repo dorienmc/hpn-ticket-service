@@ -73,6 +73,14 @@ jobs:
       - name: Run Playwright tests
         run: npm run test:e2e
 
+      - name: Install local Worker test dependencies
+        run: |
+          npm ci --prefix apps/worker
+          npm ci --prefix apps/frontend
+
+      - name: Run isolated Worker end-to-end tests
+        run: npm run test:e2e:worker
+
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4

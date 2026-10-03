@@ -1,5 +1,6 @@
 import './styles.css';
 import { renderPrivacyPageMarkup } from './privacy.js';
+import { initAdminAccessPage } from './admin-access.js';
 
 const app = document.querySelector('#app');
 
@@ -14,9 +15,10 @@ const baseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8787';
 const maxTickets = import.meta.env.VITE_MAX_TICKETS_PER_RESERVATION ?? '5';
 const reservationsEnabled = import.meta.env.VITE_RESERVATIONS_ENABLED !== 'false';
 const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY ?? '';
-const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '';
+const googleClientId = import.meta.env.VITE_GOOGLE_AUTH_CLIENT_ID ?? '';
 const path = window.location.pathname;
 const isAdminPath = path.replace(/\/+$/, '').endsWith('/admin');
+const isAdminAccessPath = path.replace(/\/+$/, '').endsWith('/admin/access');
 const isPrivacyPath = path.replace(/\/+$/, '').endsWith('/privacyverklaring');
 
 let recaptchaScriptPromise: Promise<void> | null = null;
@@ -94,12 +96,13 @@ async function initApp() {
     return;
   }
 
-  if (isAdminPath) {
+  if (isAdminPath || isAdminAccessPath) {
+    if (isAdminAccessPath) document.title = 'Toegang voor beheerders – Ticket Service Half Past Nine';
     appRoot.innerHTML = `
       <main class="page page--admin">
         <section class="card reservation-card">
           <p class="eyebrow">Beheer</p>
-          <h1>Overzicht reserveringen</h1>
+          <h1>${isAdminAccessPath ? 'Toegang voor beheerders' : 'Overzicht reserveringen'}</h1>
           <div id="admin-summary" class="summary-grid"></div>
           <div id="admin-login" class="payment-box muted-box" hidden>
             <p>Log in om reserveringen te beheren.</p>
@@ -119,6 +122,10 @@ async function initApp() {
             <div class="admin-toolbar">
               <button id="admin-logout" class="admin-button secondary">Uitloggen</button>
             </div>
+            ${isAdminAccessPath ? `
+            <div id="admin-access-page"></div>
+            <p><a class="admin-link" href="${appBaseHref}admin">Terug naar reserveringen</a></p>
+            ` : `
             <div class="admin-filters">
               <label>
                 Reserveringen zoeken
@@ -131,6 +138,8 @@ async function initApp() {
               <a class="tab-button" data-tab="ARCHIVE" href="?tab=ARCHIVE">Verlopen / geannuleerd</a>
             </div>
             <div id="admin-list" class="admin-list"></div>
+            <p><a id="admin-access-link" class="admin-link" href="${appBaseHref}admin/access" hidden>Toegang voor beheerders</a></p>
+            `}
           </div>
           <p id="admin-status" class="status" aria-live="polite"></p>
         </section>
@@ -218,6 +227,9 @@ async function initApp() {
 
       if (contentContainer) contentContainer.hidden = false;
 
+      const accessLink = document.querySelector<HTMLAnchorElement>('#admin-access-link');
+      if (accessLink) accessLink.hidden = session.canManageAdminEmails !== true;
+
       const ticketModalCloseButton = document.querySelector<HTMLButtonElement>('#ticket-modal [data-action="close-modal"]');
       ticketModalCloseButton?.addEventListener('click', () => {
         document.querySelector<HTMLDialogElement>('#ticket-modal')?.close();
@@ -234,6 +246,15 @@ async function initApp() {
         }
         window.location.reload();
       });
+
+      if (isAdminAccessPath) {
+        await initAdminAccessPage(
+          document.querySelector<HTMLElement>('#admin-access-page')!,
+          baseUrl,
+          session.canManageAdminEmails === true,
+        );
+        return;
+      }
 
       const summaryResponse = await fetch(`${baseUrl}/api/admin/summary`, { credentials: 'include' });
       const summary = await summaryResponse.json();
@@ -463,6 +484,9 @@ async function initApp() {
     } catch (error) {
       if (listContainer) {
         listContainer.innerHTML = `<p class="error-message">${error instanceof Error ? error.message : 'Beheergegevens konden niet worden geladen.'}</p>`;
+      } else {
+        const adminStatus = document.querySelector<HTMLParagraphElement>('#admin-status');
+        if (adminStatus) adminStatus.textContent = error instanceof Error ? error.message : 'Beheergegevens konden niet worden geladen.';
       }
     }
 

@@ -26,7 +26,7 @@ This project is configured for Node 24 via the repository's `.nvmrc` file and th
 - [x] CI/CD pipeline (GitHub Actions: worker tests/build, frontend build, e2e)
 - [ ] Ticket QR code support
 - [x] Ticket check-in support (manual check-in via admin UI)
-- [ ] Use same logic for wrangler and express
+- [x] Use the same Worker backend for local development, testing and production
 - [ ] Split up main.ts into several pages
 
 ## Local development with Docker Compose
@@ -47,7 +47,47 @@ The backend runs the same Worker entrypoint used in production. Wrangler provide
 
 Mailpit remains useful because its HTTP Send API is compatible with the Worker runtime. Local Worker email requests go to Mailpit over HTTP; production requests use the Gmail API.
 
-The backend settings can be configured with environment variables. `TOTAL_CAPACITY`, `MAX_TICKETS_PER_RESERVATION`, `TICKET_PRICE_CENTS`, and `RESERVATION_TTL_HOURS` come from the `vars` block in `apps/worker/wrangler.jsonc` (Wrangler loads the same file locally and in production); `FRONTEND_URL`, `EMAIL_DELIVERY`, `MAILPIT_API_URL`, `LOCAL_ADMIN_AUTH`, and the five `ING_PAYMENT_LINK_*` variables are passed as `--var` flags from `docker-compose.yml` for local development:
+### Manual development with Wrangler
+
+Express has been removed. Both manual commands and Docker Compose run the same Worker. From the repository root:
+
+```bash
+npm --prefix apps/worker run dev
+# Alternatively: npm --prefix apps/worker start
+```
+
+These commands apply local D1 migrations and start Wrangler in local mode using `apps/worker/wrangler.local.jsonc`. The API listens on port 8787. Run the frontend separately:
+
+```bash
+VITE_API_BASE_URL=http://localhost:8787 VITE_FRONTEND_URL=http://localhost:5173/hpn-ticket-service/ npm --prefix apps/frontend run dev -- --host localhost --port 5173
+```
+
+Use `http://localhost:5173/hpn-ticket-service/admin`. The local configuration enables `MOCK_GOOGLE_LOGIN` and defaults `MOCK_GOOGLE_EMAIL` to `dorienmc@gmail.com`, so the mock login link grants owner access. Additional users can sign in through `http://localhost:8787/api/auth/google?email=another@example.com` once allowed. Mock login is refused unless both the frontend and API URLs are HTTP loopback addresses; never expose the development server publicly.
+
+The local signing password is an intentionally public development-only value, not a production credential. Production deploys use `wrangler.jsonc`, which does not enable mocked authentication. Local D1 persists allowlists and audit records. Signed sessions expire after twelve hours; logout records a D1 revocation, including for copies of the old cookie. Local mail delivery uses Mailpit at `http://localhost:8025`; run Mailpit for captured emails, or pass `--var EMAIL_DELIVERY:disabled` when email capture is unnecessary.
+
+Run all unit tests and the isolated Worker E2E suite:
+
+```bash
+npm test
+npm run test:e2e:worker
+```
+
+The isolated suite runs all existing browser scenarios plus admin access and migrated reservation API tests against Wrangler and real local D1. It uses ports 8789 (API), 5180 (frontend) and 8030 (test mail capture), creates temporary D1 state, and cleans it up afterwards. It does not touch your normal local database or call Google. Install the root, Worker and frontend dependencies and Playwright Chromium before running it. CI also runs the Docker-based E2E suite with Mailpit.
+
+Coverage formerly attached to Express is now exercised against the Worker:
+
+| Former tests | Worker coverage |
+| --- | --- |
+| Reservation creation, identifiers, quantity limits, amount, capacity | `e2e/worker/reservation-api.spec.ts` and `src/cloudflare.test.ts` |
+| Expiry, cancellation, extension, missing-order handling | `e2e/worker/reservation-api.spec.ts` |
+| Order listing, idempotent payment, unique tickets, single check-in, summary quantities | `e2e/worker/reservation-api.spec.ts` |
+| Owner permissions, normalized persisted access, audit, rollback on audit failure | `src/cloudflare.test.ts`, `e2e/worker/admin-access.spec.ts`, `e2e/worker/reservation-api.spec.ts` |
+| Revocation, invalid input/JSON, non-owner/forged sessions, origin checks, disabled mocks, empty initial allowlist | `src/cloudflare.test.ts` and `e2e/worker/admin-access.spec.ts` |
+| Expired sessions and logout invalidation | `src/cloudflare.test.ts` and `e2e/worker/reservation-api.spec.ts` |
+| Per-quantity payment links and local defaults | `src/payment-links.test.ts` |
+
+Local backend defaults come from the `vars` block in `apps/worker/wrangler.local.jsonc`; production uses `apps/worker/wrangler.jsonc`. Docker Compose overrides `FRONTEND_URL`, `EMAIL_DELIVERY`, `MAILPIT_API_URL`, and the five `ING_PAYMENT_LINK_*` variables with `--var` flags:
 
 | Variable | Local default | Purpose |
 | --- | ---: | --- |
@@ -103,6 +143,8 @@ Production email delivery is enabled with `EMAIL_DELIVERY=gmail`. Store the Gmai
 	npx wrangler secret put GOOGLE_REFRESH_TOKEN
 	```
 
+These three credentials are used only for sending mail. Keep the existing refresh token paired with the client ID and client secret that issued it; admin Google Sign-In uses a separate `GOOGLE_AUTH_CLIENT_ID`.
+
 The Worker sends from the fixed `GOOGLE_SENDER_EMAIL` address (currently `dorienmc@gmail.com` in `apps/worker/wrangler.jsonc`), which must be an address authorized by the Gmail account.
 
 To verify the refresh token locally without deploying the Worker or sending an email, run:
@@ -126,6 +168,12 @@ To protect the public reservation form, create a Google reCAPTCHA v3 key pair fo
 
 When `ADMIN_PASSWORD` is set, the admin login page also accepts that password and issues a signed session cookie, independent of Cloudflare Access.
 
+Password sessions use the exact `expiry.nonce.signature` format, with a random
+nonce signed together with the expiry. Logout revokes the complete validated
+session value, while a new login gets a distinct session even within the same
+second. Older two-field password cookies are rejected; users must sign in again
+after deploying this change. No additional database migration is required.
+
 **Google Sign-In with an email allowlist:**
 
 - In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create an OAuth client of type **Web application**.
@@ -133,18 +181,26 @@ When `ADMIN_PASSWORD` is set, the admin login page also accepts that password an
 - Copy the client ID and store it as a Cloudflare Worker secret:
 
 	```bash
-	npx wrangler secret put GOOGLE_CLIENT_ID
+	npx wrangler secret put GOOGLE_AUTH_CLIENT_ID
 	```
 
-- Manage the allowlist directly in `apps/worker/wrangler.jsonc` as the committed `ADMIN_ALLOWED_EMAILS` var, a comma-separated list of Gmail addresses allowed to sign in as admin, e.g. `"organiser@example.com, backup@example.com"`. Leave it empty to allow any Google account with a verified email. Redeploy the Worker after changing it.
+- `ADMIN_ALLOWED_EMAILS` in `apps/worker/wrangler.jsonc` provides the initial allowlist until the owner saves a list through the admin UI. An empty value does not allow public access: only the fixed owner, `dorienmc@gmail.com`, can sign in.
+
+- Sign in with Google as `dorienmc@gmail.com` and follow **Toegang voor beheerders** at the bottom of the admin overview to the separate `/admin/access` page. Enter one Google account email per line and save. The owner address must remain in the list. Only the owner signed in with Google can see this link or view/change the list; password login and other admins cannot manage access, including via direct navigation. Changes are stored in D1, recorded in `admin_access_audit`, and take effect on the next request, including for existing sessions. No redeployment is needed for later email changes. After the first save, the D1 list replaces `ADMIN_ALLOWED_EMAILS`.
+
+- The access page also displays the current Worker values of `GOOGLE_CLIENT_ID`, `GOOGLE_AUTH_CLIENT_ID`, and `ING_PAYMENT_LINK_1` through `ING_PAYMENT_LINK_5` in a read-only configuration section. Unset values show **Niet ingesteld**. Only the Google owner can retrieve these values; responses are not cached. Client secrets, refresh tokens, and passwords are never included.
+
+- On upgrading, run `npm run db:migrate:remote` (or the **Deploy Cloudflare Worker** workflow) to create the access settings, audit and session-revocation tables, then deploy both the Worker and Pages. Manual and Docker development apply the local migrations on startup and support mocked owner login without Google.
 
 - The Worker signs Google session cookies with `ADMIN_PASSWORD`, so it must be set (see the password fallback above) even if you don't intend to use password login yourself.
 
-- Add the same client ID as a GitHub Pages variable (`GOOGLE_CLIENT_ID`, see step 6 below) so the frontend can render the Google Sign-In button.
+- Add the same sign-in client ID as a GitHub Actions repository variable (`GOOGLE_AUTH_CLIENT_ID`, see the table below) so the frontend can render the Google Sign-In button. This can be a different OAuth client from the one used for Gmail.
+
+- When upgrading an existing deployment, set `GOOGLE_AUTH_CLIENT_ID` in both Cloudflare and GitHub Actions, then redeploy both the Worker and Pages. Google Sign-In no longer uses `GOOGLE_CLIENT_ID`; leave the Gmail credentials unchanged.
 
 1. Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as GitHub Actions secrets. Run the **Deploy Cloudflare Worker** workflow manually. It validates the bundle, applies the D1 schema, and deploys the Worker.
 
-	`db:migrate:remote` runs `wrangler d1 execute --remote --file migrations/0001_initial.sql` directly rather than `wrangler d1 migrations apply --remote`, because the latter currently fails with Cloudflare API error `7403` on this account. The schema statements use `IF NOT EXISTS`, so rerunning it is safe. If you add a new migration file, update this script (or switch back to `wrangler d1 migrations apply` if Cloudflare resolves the issue) so it gets applied too.
+	`db:migrate:remote` runs `wrangler d1 execute --remote --file` for `migrations/0001_initial.sql`, `migrations/0002_admin_access.sql` and `migrations/0003_admin_session_revocations.sql` directly rather than `wrangler d1 migrations apply --remote`, because the latter currently fails with Cloudflare API error `7403` on this account. The schema statements use `IF NOT EXISTS`, so rerunning it is safe. If you add a new migration file, update this script (or switch back to `wrangler d1 migrations apply` if Cloudflare resolves the issue) so it gets applied too.
 
 2. Verify the deployed `/api/health` endpoint. Then add these GitHub Actions repository variables:
 
@@ -152,7 +208,7 @@ When `ADMIN_PASSWORD` is set, the admin login page also accepts that password an
 	| --- | --- |
 	| `CLOUDFLARE_WORKER_URL` | Worker origin, without a trailing slash |
 	| `RECAPTCHA_SITE_KEY` | Public Google reCAPTCHA v3 site key |
-	| `GOOGLE_CLIENT_ID` | Google OAuth client ID, passed to the frontend as `VITE_GOOGLE_CLIENT_ID` |
+	| `GOOGLE_AUTH_CLIENT_ID` | Admin Google Sign-In OAuth client ID, passed to the frontend as `VITE_GOOGLE_AUTH_CLIENT_ID` |
 
 Rerun **Deploy GitHub Pages** after configuring the repository variables. Reservations are enabled for push-triggered deployments and by default for manual deployments; choose `reservations_enabled=false` in a manual run to temporarily disable the public reservation button.
 
