@@ -210,7 +210,15 @@ describe('Local Worker mock login (replaces Express authentication tests)', () =
   it('expires mock sessions after twelve hours and clears the signed cookie on logout', async () => {
     const bindings = mockEnv();
     const cookie = await mockLogin(bindings);
-    const logout = await app.request('/api/auth/logout', { method: 'POST', headers: { Cookie: cookie } }, bindings);
+    const rejectedLogout = await app.request('/api/auth/logout', {
+      method: 'POST', headers: { Cookie: cookie },
+    }, bindings);
+    expect(rejectedLogout.status).toBe(403);
+    expect((await app.request('/api/admin/orders', { headers: { Cookie: cookie } }, bindings)).status).toBe(200);
+
+    const logout = await app.request('/api/auth/logout', {
+      method: 'POST', headers: { Cookie: cookie, Origin: 'http://localhost:5173' },
+    }, bindings);
     expect(logout.status).toBe(204);
     expect(logout.headers.get('set-cookie')).toContain('hpn_admin_google_session=;');
     expect(logout.headers.get('set-cookie')).toContain('Max-Age=0');
@@ -326,7 +334,9 @@ describe('Owner-managed admin access', () => {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential: 'id-token' }),
     }, bindings);
     expect(response.status).toBe(401);
-    const logout = await app.request('/api/auth/logout', { method: 'POST', headers: { Cookie: other } }, bindings);
+    const logout = await app.request('/api/auth/logout', {
+      method: 'POST', headers: { Cookie: other, Origin: 'https://example.github.io' },
+    }, bindings);
     expect(logout.status).toBe(204);
     expect((await saveAccess(owner, ['dorienmc@gmail.com', 'admin@example.com'], bindings)).status).toBe(200);
     expect((await app.request('/api/admin/orders', { headers: { Cookie: other } }, bindings)).status).toBe(401);
@@ -464,9 +474,13 @@ describe('Cloudflare Worker shell', () => {
     });
   });
 
-  it('returns a local logout response without a Cloudflare Access redirect', async () => {
-    const response = await app.request('https://api.example.com/api/auth/logout', { method: 'POST' }, env);
+  it('requires the frontend origin before processing logout', async () => {
+    const crossSiteResponse = await app.request('https://api.example.com/api/auth/logout', { method: 'POST' }, env);
+    expect(crossSiteResponse.status).toBe(403);
 
+    const response = await app.request('https://api.example.com/api/auth/logout', {
+      method: 'POST', headers: { Origin: 'https://example.github.io' },
+    }, env);
     expect(response.status).toBe(204);
   });
 
@@ -542,7 +556,7 @@ describe('Cloudflare Worker shell', () => {
 
     const logout = await app.request('/api/auth/logout', {
       method: 'POST',
-      headers: { Cookie: cookie },
+      headers: { Cookie: cookie, Origin: 'https://example.github.io' },
     }, passwordEnv);
 
     expect(logout.status).toBe(204);
@@ -587,7 +601,7 @@ describe('Cloudflare Worker shell', () => {
       `${expiry}.${crypto.randomUUID()}.${signature}`,
       `${expiry}.${nonce}.invalid`,
     ]) {
-      const headers = { Cookie: `hpn_admin_password_session=${value}` };
+      const headers = { Cookie: `hpn_admin_password_session=${value}`, Origin: 'https://example.github.io' };
       prepare.mockClear();
       expect((await app.request('/api/admin/orders', { headers }, passwordEnv)).status).toBe(401);
       expect(prepare).not.toHaveBeenCalled();
@@ -713,6 +727,7 @@ describe('Cloudflare Worker shell', () => {
   it('clears Google session cookies when the sign-in client is configured', async () => {
     const response = await app.request('/api/auth/logout', {
       method: 'POST',
+      headers: { Origin: 'https://example.github.io' },
     }, {
       FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
       GOOGLE_AUTH_CLIENT_ID: 'sign-in-client-id',

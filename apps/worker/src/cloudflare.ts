@@ -492,6 +492,9 @@ app.post('/api/auth/password', async (context) => {
   return context.json({ authenticated: true });
 });
 app.post('/api/auth/logout', async (context) => {
+  if (!requestComesFromFrontend(context.req.raw.headers, context.env)) {
+    return context.json({ error: 'Cross-site admin requests are not allowed' }, 403);
+  }
   const headers = context.req.raw.headers;
   const sessionsToRevoke: { value: string; expiresAt: number }[] = [];
   const passwordValue = passwordSessionValue(headers);

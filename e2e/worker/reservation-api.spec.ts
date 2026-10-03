@@ -143,7 +143,7 @@ test('logout invalidates the original session and permits a fresh login (former 
   await login(request);
   const replay = await playwright.request.newContext({ storageState: await request.storageState() });
   try {
-    expect((await request.post(`${api}/api/auth/logout`)).status()).toBe(204);
+    expect((await request.post(`${api}/api/auth/logout`, { headers: { Origin: origin } })).status()).toBe(204);
     expect((await replay.get(`${api}/api/admin/orders`)).status()).toBe(401);
     await login(request);
     expect((await request.get(`${api}/api/admin/orders`)).ok()).toBeTruthy();
