@@ -65,6 +65,9 @@ jobs:
 
       - run: npx playwright install --with-deps chromium
 
+      - name: Prepare local dependency directories
+        run: mkdir -p apps/worker/node_modules apps/frontend/node_modules
+
       - name: Start application stack
         env:
           COMPOSE_BAKE: 'true'
