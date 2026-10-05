@@ -172,7 +172,7 @@ Password sessions use the exact `expiry.nonce.signature` format, with a random
 nonce signed together with the expiry. Logout revokes the complete validated
 session value, while a new login gets a distinct session even within the same
 second. Older two-field password cookies are rejected; users must sign in again
-after deploying this change. No additional database migration is required.
+after deploying this change.
 
 **Google Sign-In with an email allowlist:**
 
@@ -190,7 +190,7 @@ after deploying this change. No additional database migration is required.
 
 - The access page also displays the current Worker values of `GOOGLE_CLIENT_ID`, `GOOGLE_AUTH_CLIENT_ID`, and `ING_PAYMENT_LINK_1` through `ING_PAYMENT_LINK_5` in a read-only configuration section. Unset values show **Niet ingesteld**. Only the Google owner can retrieve these values; responses are not cached. Client secrets, refresh tokens, and passwords are never included.
 
-- On upgrading, run `npm run db:migrate:remote` (or the **Deploy Cloudflare Worker** workflow) to create the access settings, audit and session-revocation tables, then deploy both the Worker and Pages. Manual and Docker development apply the local migrations on startup and support mocked owner login without Google.
+- Before deploying an upgrade, apply migration 0003 and any earlier pending migrations with `npm run db:migrate:remote` (or use the **Deploy Cloudflare Worker** workflow) to create the access settings, audit and session-revocation tables. Then deploy both the Worker and Pages. Manual and Docker development apply the local migrations on startup and support mocked owner login without Google.
 
 - The Worker signs Google session cookies with `ADMIN_PASSWORD`, so it must be set (see the password fallback above) even if you don't intend to use password login yourself.
 
