@@ -37,14 +37,12 @@ services:
       - /app/node_modules
       - wrangler-data:/app/.wrangler
     command: >-
-      sh -c "npm run db:migrate:local &&
-      npm run dev:cloudflare --
+      sh -c "npm run dev --
       --ip 0.0.0.0
       --port 8787
       --var FRONTEND_URL:$${FRONTEND_URL}
       --var EMAIL_DELIVERY:mailpit
       --var MAILPIT_API_URL:http://mailpit:8025
-      --var LOCAL_ADMIN_AUTH:true
       --var ING_PAYMENT_LINK_1:https://www.ing.nl/payreq/m/?trxid=example-demo-link-1-ticket
       --var ING_PAYMENT_LINK_2:https://www.ing.nl/payreq/m/?trxid=example-demo-link-2-tickets
       --var ING_PAYMENT_LINK_3:https://www.ing.nl/payreq/m/?trxid=example-demo-link-3-tickets

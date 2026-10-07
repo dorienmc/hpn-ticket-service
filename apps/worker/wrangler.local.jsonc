@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hpn-ticket-service-local",
+  "main": "src/cloudflare.ts",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "FRONTEND_URL": "http://localhost:5173/hpn-ticket-service/",
+    "TOTAL_CAPACITY": "100",
+    "MAX_TICKETS_PER_RESERVATION": "5",
+    "TICKET_PRICE_CENTS": "1000",
+    "RESERVATION_TTL_HOURS": "48",
+    "EMAIL_DELIVERY": "mailpit",
+    "MAILPIT_API_URL": "http://localhost:8025",
+    "MOCK_GOOGLE_LOGIN": "true",
+    "MOCK_GOOGLE_EMAIL": "dorienmc@gmail.com",
+    "ADMIN_PASSWORD": "local-development-only",
+    "ADMIN_ALLOWED_EMAILS": "dorienmc@gmail.com",
+    "ING_PAYMENT_LINK_1": "https://www.ing.nl/payreq/m/?trxid=example-demo-link-1-ticket",
+    "ING_PAYMENT_LINK_2": "https://www.ing.nl/payreq/m/?trxid=example-demo-link-2-tickets",
+    "ING_PAYMENT_LINK_3": "https://www.ing.nl/payreq/m/?trxid=example-demo-link-3-tickets",
+    "ING_PAYMENT_LINK_4": "https://www.ing.nl/payreq/m/?trxid=example-demo-link-4-tickets",
+    "ING_PAYMENT_LINK_5": "https://www.ing.nl/payreq/m/?trxid=example-demo-link-5-tickets"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "hpn-ticket-service-prod",
+      "database_id": "4c9e7d56-07dd-41ed-ab82-8d6abe14f806"
+    }
+  ]
+}

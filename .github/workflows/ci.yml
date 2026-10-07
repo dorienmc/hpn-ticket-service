@@ -65,6 +65,17 @@ jobs:
 
       - run: npx playwright install --with-deps chromium
 
+      - name: Install local Worker test dependencies
+        run: |
+          npm ci --prefix apps/worker
+          npm ci --prefix apps/frontend
+
+      - name: Run isolated Worker end-to-end tests
+        run: npm run test:e2e:worker
+
+      - name: Prepare local dependency directories
+        run: mkdir -p apps/worker/node_modules apps/frontend/node_modules
+
       - name: Start application stack
         env:
           COMPOSE_BAKE: 'true'

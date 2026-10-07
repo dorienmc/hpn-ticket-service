@@ -23,10 +23,18 @@ const reservation: ReservationRecord = {
 
 function createReservationDb(reservationToFind = reservation) {
   let storedReservation = reservationToFind;
+  let storedEmails: string | null = null;
+  const revokedSessions = new Set<string>();
 
   function createPreparedResult(statement: string, args: unknown[]) {
     return {
       async run() {
+        if (statement.includes('INSERT OR IGNORE INTO admin_session_revocations')) {
+          revokedSessions.add(String(args[0]));
+        }
+        if (statement.includes('INSERT INTO admin_access_settings')) {
+          storedEmails = String(args[0]);
+        }
         if (statement.includes("UPDATE orders SET status = 'EXPIRED'")
           && storedReservation.status === 'RESERVED'
           && storedReservation.expires_at <= String(args[0])) {
@@ -35,6 +43,12 @@ function createReservationDb(reservationToFind = reservation) {
         return { meta: { changes: 1 } };
       },
       async first<T>() {
+        if (statement.includes('SELECT session_value FROM admin_session_revocations')) {
+          return revokedSessions.has(String(args[0])) ? { session_value: String(args[0]) } as T : null;
+        }
+        if (statement.includes('SELECT emails FROM admin_access_settings')) {
+          return storedEmails === null ? null : { emails: storedEmails } as T;
+        }
         if (statement.includes('SELECT COALESCE(SUM(quantity), 0) AS active_quantity')) {
           return { active_quantity: 0 } as T;
         }
@@ -68,6 +82,9 @@ function createReservationDb(reservationToFind = reservation) {
   }
 
   return {
+    async batch(statements: { run(): Promise<unknown> }[]) {
+      return Promise.all(statements.map((statement) => statement.run()));
+    },
     prepare(statement: string) {
       return {
         ...createPreparedResult(statement, []),
@@ -81,6 +98,286 @@ function createReservationDb(reservationToFind = reservation) {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe('Local Worker mock login (replaces Express authentication tests)', () => {
+  function mockEnv() {
+    return {
+      FRONTEND_URL: 'http://localhost:5173/hpn-ticket-service/',
+      MOCK_GOOGLE_LOGIN: 'true',
+      MOCK_GOOGLE_EMAIL: 'dorienmc@gmail.com',
+      ADMIN_PASSWORD: 'local-test-password',
+      ADMIN_ALLOWED_EMAILS: 'admin@example.com',
+      DB: createReservationDb(),
+    };
+  }
+
+  async function mockLogin(bindings: ReturnType<typeof mockEnv>, email = 'dorienmc@gmail.com') {
+    const response = await app.request(`http://localhost:8787/api/auth/google?email=${encodeURIComponent(email)}`, {}, bindings);
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe('http://localhost:5173/hpn-ticket-service/admin');
+    return response.headers.get('set-cookie')!.split(';')[0];
+  }
+
+  it('issues signed email-specific sessions and never calls Google', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch');
+    const bindings = mockEnv();
+    const owner = await mockLogin(bindings);
+    const other = await mockLogin(bindings, 'admin@example.com');
+    expect(owner).not.toBe(other);
+    const ownerSession = await app.request('/api/auth/session', { headers: { Cookie: owner } }, bindings);
+    expect(await ownerSession.json()).toEqual({ authenticated: true, provider: 'google', canManageAdminEmails: true });
+    const otherSession = await app.request('/api/auth/session', { headers: { Cookie: other } }, bindings);
+    expect(await otherSession.json()).toEqual({ authenticated: true, provider: 'google' });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('exposes only the requested configuration to the Google owner without caching', async () => {
+    const bindings = {
+      ...mockEnv(),
+      GOOGLE_CLIENT_ID: 'mail-client-id',
+      GOOGLE_AUTH_CLIENT_ID: 'login-client-id',
+      ING_PAYMENT_LINK_1: 'https://example.com/pay/1',
+      ING_PAYMENT_LINK_2: 'https://example.com/pay/2',
+      ING_PAYMENT_LINK_3: 'https://example.com/pay/3',
+      ING_PAYMENT_LINK_4: 'https://example.com/pay/4',
+      ING_PAYMENT_LINK_5: 'https://example.com/pay/5',
+      GOOGLE_CLIENT_SECRET: 'must-not-be-returned',
+      GOOGLE_REFRESH_TOKEN: 'must-not-be-returned',
+    };
+    const cookie = await mockLogin(bindings);
+    const response = await app.request('/api/admin/access/config', { headers: { Cookie: cookie } }, bindings);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(await response.json()).toEqual({
+      GOOGLE_CLIENT_ID: bindings.GOOGLE_CLIENT_ID,
+      GOOGLE_AUTH_CLIENT_ID: bindings.GOOGLE_AUTH_CLIENT_ID,
+      ING_PAYMENT_LINK_1: bindings.ING_PAYMENT_LINK_1,
+      ING_PAYMENT_LINK_2: bindings.ING_PAYMENT_LINK_2,
+      ING_PAYMENT_LINK_3: bindings.ING_PAYMENT_LINK_3,
+      ING_PAYMENT_LINK_4: bindings.ING_PAYMENT_LINK_4,
+      ING_PAYMENT_LINK_5: bindings.ING_PAYMENT_LINK_5,
+    });
+  });
+
+  it('returns null for unset configuration and denies anonymous, non-owner and password sessions', async () => {
+    const bindings = mockEnv();
+    const cookie = await mockLogin(bindings);
+    const response = await app.request('/api/admin/access/config', { headers: { Cookie: cookie } }, bindings);
+    expect(await response.json()).toEqual({
+      GOOGLE_CLIENT_ID: null, GOOGLE_AUTH_CLIENT_ID: null,
+      ING_PAYMENT_LINK_1: null, ING_PAYMENT_LINK_2: null, ING_PAYMENT_LINK_3: null,
+      ING_PAYMENT_LINK_4: null, ING_PAYMENT_LINK_5: null,
+    });
+    expect((await app.request('/api/admin/access/config', {}, bindings)).status).toBe(401);
+    const other = await mockLogin(bindings, 'admin@example.com');
+    expect((await app.request('/api/admin/access/config', { headers: { Cookie: other } }, bindings)).status).toBe(403);
+    const password = await app.request('/api/auth/password', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: bindings.ADMIN_PASSWORD }),
+    }, bindings);
+    expect(password.status).toBe(200);
+    expect((await app.request('/api/admin/access/config', {
+      headers: { Cookie: password.headers.get('set-cookie')!.split(';')[0] },
+    }, bindings)).status).toBe(403);
+  });
+
+  it('rejects disabled mocks, non-loopback frontends and non-loopback API requests', async () => {
+    for (const bindings of [
+      { ...mockEnv(), MOCK_GOOGLE_LOGIN: 'false' },
+      { ...mockEnv(), FRONTEND_URL: 'https://example.com' },
+    ]) {
+      expect((await app.request('http://localhost:8787/api/auth/google', {}, bindings)).status).toBe(404);
+    }
+    expect((await app.request('https://api.example.com/api/auth/google', {}, mockEnv())).status).toBe(404);
+    expect((await app.request('http://localhost:8787/api/auth/google', {}, { ...mockEnv(), ADMIN_PASSWORD: '' })).status).toBe(500);
+  });
+
+  it('cannot bypass production reCAPTCHA by setting the mock flag', async () => {
+    await expect(verifyRecaptcha({
+      MOCK_GOOGLE_LOGIN: 'true', FRONTEND_URL: 'https://example.com',
+    } as never, undefined)).resolves.toBe(false);
+  });
+
+  it('blocks disallowed users and legacy/forged session cookies', async () => {
+    const bindings = mockEnv();
+    expect((await app.request('http://localhost:8787/api/auth/google?email=stranger@example.com', {}, bindings)).status).toBe(403);
+    for (const cookie of ['hpn_mock_google_admin=authenticated', 'hpn_local_admin=authenticated', 'hpn_admin_google_session=forged']) {
+      expect((await app.request('/api/admin/orders', { headers: { Cookie: cookie } }, bindings)).status).toBe(401);
+    }
+  });
+
+  it('expires mock sessions after twelve hours and clears the signed cookie on logout', async () => {
+    const bindings = mockEnv();
+    const cookie = await mockLogin(bindings);
+    const rejectedLogout = await app.request('/api/auth/logout', {
+      method: 'POST', headers: { Cookie: cookie },
+    }, bindings);
+    expect(rejectedLogout.status).toBe(403);
+    expect((await app.request('/api/admin/orders', { headers: { Cookie: cookie } }, bindings)).status).toBe(200);
+
+    const logout = await app.request('/api/auth/logout', {
+      method: 'POST', headers: { Cookie: cookie, Origin: 'http://localhost:5173' },
+    }, bindings);
+    expect(logout.status).toBe(204);
+    expect(logout.headers.get('set-cookie')).toContain('hpn_admin_google_session=;');
+    expect(logout.headers.get('set-cookie')).toContain('Max-Age=0');
+    expect((await app.request('/api/admin/orders', { headers: { Cookie: cookie } }, bindings)).status).toBe(401);
+    const newCookie = await mockLogin(bindings);
+    expect((await app.request('/api/admin/orders', { headers: { Cookie: newCookie } }, bindings)).status).toBe(200);
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 12 * 60 * 60 * 1000 + 1000);
+    expect((await app.request('/api/admin/orders', { headers: { Cookie: newCookie } }, bindings)).status).toBe(401);
+  });
+
+  it('persists the allowlist and audit in one D1 transaction and surfaces write failures', async () => {
+    const bindings = mockEnv();
+    const cookie = await mockLogin(bindings);
+    const batch = vi.spyOn(bindings.DB, 'batch').mockRejectedValueOnce(new Error('audit unavailable'));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const response = await app.request('/api/admin/access', {
+      method: 'POST',
+      headers: { Cookie: cookie, Origin: 'http://localhost:5173', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ emails: ['dorienmc@gmail.com'] }),
+    }, bindings);
+    expect(response.status).toBe(500);
+    expect(batch).toHaveBeenCalledWith([expect.any(Object), expect.any(Object)]);
+    expect(log).toHaveBeenCalled();
+    const saved = await app.request('/api/admin/access', { headers: { Cookie: cookie } }, bindings);
+    expect(await saved.json()).toMatchObject({ emails: ['dorienmc@gmail.com', 'admin@example.com'] });
+  });
+});
+
+describe('Owner-managed admin access', () => {
+  function accessEnv() {
+    return {
+      FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
+      GOOGLE_AUTH_CLIENT_ID: 'sign-in-client-id',
+      ADMIN_PASSWORD: 'super-secret',
+      ADMIN_ALLOWED_EMAILS: 'admin@example.com',
+      RESEND_API_KEY: '',
+      RESEND_FROM_EMAIL: '',
+      DB: createReservationDb(),
+    };
+  }
+
+  async function login(email: string, bindings: ReturnType<typeof accessEnv>) {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+      aud: 'sign-in-client-id', email, email_verified: true,
+    })));
+    const response = await app.request('/api/auth/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential: 'id-token' }),
+    }, bindings);
+    expect(response.status).toBe(200);
+    return response.headers.get('set-cookie')!.split(';')[0];
+  }
+
+  function saveAccess(cookie: string, emails: unknown, bindings: ReturnType<typeof accessEnv>, origin = 'https://example.github.io') {
+    return app.request('/api/admin/access', {
+      method: 'POST',
+      headers: { Cookie: cookie, Origin: origin, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ emails }),
+    }, bindings);
+  }
+
+  it('lets only the fixed Google owner manage and persist normalized access with an audit record', async () => {
+    const bindings = accessEnv();
+    const cookie = await login('dorienmc@gmail.com', bindings);
+    const session = await app.request('/api/auth/session', { headers: { Cookie: cookie } }, bindings);
+    expect(await session.json()).toMatchObject({ canManageAdminEmails: true });
+    const initial = await app.request('/api/admin/access', { headers: { Cookie: cookie } }, bindings);
+    expect(await initial.json()).toEqual({
+      ownerEmail: 'dorienmc@gmail.com', emails: ['dorienmc@gmail.com', 'admin@example.com'],
+    });
+    const batch = vi.spyOn(bindings.DB, 'batch');
+    const prepare = vi.spyOn(bindings.DB, 'prepare');
+    const response = await saveAccess(cookie, ['dorienmc@gmail.com', ' NEW@Example.com ', 'new@example.com'], bindings);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ownerEmail: 'dorienmc@gmail.com', emails: ['dorienmc@gmail.com', 'new@example.com'] });
+    expect(batch).toHaveBeenCalledWith([expect.any(Object), expect.any(Object)]);
+    expect(prepare).toHaveBeenCalledWith('INSERT INTO admin_access_audit (actor_email, emails, created_at) VALUES (?, ?, ?)');
+    const saved = await app.request('/api/admin/access', { headers: { Cookie: cookie } }, { ...bindings });
+    expect(await saved.json()).toEqual({ ownerEmail: 'dorienmc@gmail.com', emails: ['dorienmc@gmail.com', 'new@example.com'] });
+    await login('new@example.com', bindings);
+  });
+
+  it('rejects another Google admin and password-only sessions', async () => {
+    const bindings = accessEnv();
+    const otherCookie = await login('admin@example.com', bindings);
+    const otherSession = await app.request('/api/auth/session', { headers: { Cookie: otherCookie } }, bindings);
+    expect(await otherSession.json()).not.toHaveProperty('canManageAdminEmails');
+    const password = await app.request('/api/auth/password', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: bindings.ADMIN_PASSWORD }),
+    }, bindings);
+    const passwordCookie = password.headers.get('set-cookie')!.split(';')[0];
+    const batch = vi.spyOn(bindings.DB, 'batch');
+    for (const cookie of [otherCookie, passwordCookie]) {
+      expect((await app.request('/api/admin/access', { headers: { Cookie: cookie } }, bindings)).status).toBe(403);
+      expect((await saveAccess(cookie, ['dorienmc@gmail.com'], bindings)).status).toBe(403);
+    }
+    expect(batch).not.toHaveBeenCalled();
+  });
+
+  it('revokes existing sessions and future logins immediately after removal', async () => {
+    const bindings = accessEnv();
+    const owner = await login('dorienmc@gmail.com', bindings);
+    const other = await login('admin@example.com', bindings);
+    expect((await saveAccess(owner, ['dorienmc@gmail.com'], bindings)).status).toBe(200);
+    const session = await app.request('/api/auth/session', { headers: { Cookie: other } }, bindings);
+    expect(await session.json()).toMatchObject({ authenticated: false });
+    expect((await app.request('/api/admin/orders', { headers: { Cookie: other } }, bindings)).status).toBe(401);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+      aud: 'sign-in-client-id', email: 'admin@example.com', email_verified: true,
+    })));
+    const response = await app.request('/api/auth/google', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential: 'id-token' }),
+    }, bindings);
+    expect(response.status).toBe(401);
+    const logout = await app.request('/api/auth/logout', {
+      method: 'POST', headers: { Cookie: other, Origin: 'https://example.github.io' },
+    }, bindings);
+    expect(logout.status).toBe(204);
+    expect((await saveAccess(owner, ['dorienmc@gmail.com', 'admin@example.com'], bindings)).status).toBe(200);
+    expect((await app.request('/api/admin/orders', { headers: { Cookie: other } }, bindings)).status).toBe(401);
+  });
+
+  it('rejects empty, malformed, oversized and owner-removing lists without writing', async () => {
+    const bindings = accessEnv();
+    const owner = await login('dorienmc@gmail.com', bindings);
+    const batch = vi.spyOn(bindings.DB, 'batch');
+    for (const emails of [[], ['new@example.com'], ['dorienmc@gmail.com', 'bad-email'], [42],
+      'dorienmc@gmail.com', Array(101).fill('dorienmc@gmail.com'), ['dorienmc@gmail.com', `${'a'.repeat(255)}@example.com`]]) {
+      expect((await saveAccess(owner, emails, bindings)).status).toBe(400);
+    }
+    const malformed = await app.request('/api/admin/access', {
+      method: 'POST',
+      headers: { Cookie: owner, Origin: 'https://example.github.io', 'Content-Type': 'application/json' },
+      body: '{',
+    }, bindings);
+    expect(malformed.status).toBe(400);
+    expect(batch).not.toHaveBeenCalled();
+  });
+
+  it('blocks unauthenticated, forged and cross-site changes', async () => {
+    const bindings = accessEnv();
+    const owner = await login('dorienmc@gmail.com', bindings);
+    const batch = vi.spyOn(bindings.DB, 'batch');
+    expect((await saveAccess('', ['dorienmc@gmail.com'], bindings)).status).toBe(401);
+    expect((await saveAccess(`${owner}invalid`, ['dorienmc@gmail.com'], bindings)).status).toBe(401);
+    expect((await saveAccess(owner, ['dorienmc@gmail.com'], bindings, 'https://attacker.example')).status).toBe(403);
+    expect((await saveAccess(owner, ['dorienmc@gmail.com'], bindings, '')).status).toBe(403);
+    expect(batch).not.toHaveBeenCalled();
+  });
+
+  it('allows only the fixed owner when the initial list is empty', async () => {
+    const bindings = { ...accessEnv(), ADMIN_ALLOWED_EMAILS: '' };
+    await login('dorienmc@gmail.com', bindings);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+      aud: 'sign-in-client-id', email: 'stranger@example.com', email_verified: true,
+    })));
+    await expect(verifyGoogleIdToken(bindings, 'id-token')).resolves.toBeNull();
+  });
 });
 
 describe('Cloudflare Worker shell', () => {
@@ -134,14 +431,19 @@ describe('Cloudflare Worker shell', () => {
       },
     } as never;
 
-    const response = await app.request('/api/admin/summary', {
-      headers: { Cookie: 'hpn_local_admin=authenticated' },
-    }, {
+    const summaryEnv = {
       FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
-      LOCAL_ADMIN_AUTH: 'true',
+      ADMIN_PASSWORD: 'super-secret',
       TOTAL_CAPACITY: '20',
       DB: db,
-    } as never);
+    } as never;
+    const login = await app.request('/api/auth/password', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: 'super-secret' }),
+    }, summaryEnv);
+    const response = await app.request('/api/admin/summary', {
+      headers: { Cookie: login.headers.get('set-cookie')!.split(';')[0] },
+    }, summaryEnv);
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
@@ -172,9 +474,13 @@ describe('Cloudflare Worker shell', () => {
     });
   });
 
-  it('returns a local logout response without a Cloudflare Access redirect', async () => {
-    const response = await app.request('https://api.example.com/api/auth/logout', { method: 'POST' }, env);
+  it('requires the frontend origin before processing logout', async () => {
+    const crossSiteResponse = await app.request('https://api.example.com/api/auth/logout', { method: 'POST' }, env);
+    expect(crossSiteResponse.status).toBe(403);
 
+    const response = await app.request('https://api.example.com/api/auth/logout', {
+      method: 'POST', headers: { Origin: 'https://example.github.io' },
+    }, env);
     expect(response.status).toBe(204);
   });
 
@@ -234,6 +540,76 @@ describe('Cloudflare Worker shell', () => {
     });
   });
 
+  it('revokes copied password sessions on logout', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000);
+    const passwordEnv = {
+      FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
+      ADMIN_PASSWORD: 'super-secret',
+      DB: createReservationDb(),
+    } as never;
+    const loginResponse = await app.request('/api/auth/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: 'super-secret' }),
+    }, passwordEnv);
+    const cookie = loginResponse.headers.get('set-cookie')!.split(';')[0];
+
+    const logout = await app.request('/api/auth/logout', {
+      method: 'POST',
+      headers: { Cookie: cookie, Origin: 'https://example.github.io' },
+    }, passwordEnv);
+
+    expect(logout.status).toBe(204);
+    await expect((await app.request('/api/auth/session', { headers: { Cookie: cookie } }, passwordEnv)).json())
+      .resolves.toMatchObject({ authenticated: false });
+    expect((await app.request('/api/admin/orders', { headers: { Cookie: cookie } }, passwordEnv)).status).toBe(401);
+    expect((await app.request('/api/admin/orders', { headers: { Cookie: `${cookie}.x` } }, passwordEnv)).status).toBe(401);
+    const relogin = await app.request('/api/auth/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: 'super-secret' }),
+    }, passwordEnv);
+    expect(relogin.status).toBe(200);
+    const newCookie = relogin.headers.get('set-cookie')!.split(';')[0];
+    expect(newCookie).not.toBe(cookie);
+    expect(newCookie.split('.')[0]).toBe(cookie.split('.')[0]);
+    expect((await app.request('/api/admin/orders', { headers: { Cookie: newCookie } }, passwordEnv)).status).toBe(200);
+    expect((await app.request('/api/admin/orders', { headers: { Cookie: cookie } }, passwordEnv)).status).toBe(401);
+  });
+
+  it('rejects malformed password sessions and nonce tampering before querying revocations', async () => {
+    const db = createReservationDb();
+    const passwordEnv = {
+      FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
+      ADMIN_PASSWORD: 'super-secret',
+      DB: db,
+    };
+    const login = await app.request('/api/auth/password', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: passwordEnv.ADMIN_PASSWORD }),
+    }, passwordEnv);
+    const cookie = login.headers.get('set-cookie')!.split(';')[0];
+    const [expiry, nonce, signature] = cookie.slice(cookie.indexOf('=') + 1).split('.');
+    expect(nonce).toMatch(/^[0-9a-f-]{36}$/);
+    const prepare = vi.spyOn(db, 'prepare');
+    for (const value of [
+      `${expiry}.${signature}`,
+      `${expiry}.${nonce}.${signature}.x`,
+      `${expiry}.${nonce}.${signature}.`,
+      `${expiry}..${signature}`,
+      `${expiry}.invalid.${signature}`,
+      `${expiry}.${crypto.randomUUID()}.${signature}`,
+      `${expiry}.${nonce}.invalid`,
+    ]) {
+      const headers = { Cookie: `hpn_admin_password_session=${value}`, Origin: 'https://example.github.io' };
+      prepare.mockClear();
+      expect((await app.request('/api/admin/orders', { headers }, passwordEnv)).status).toBe(401);
+      expect(prepare).not.toHaveBeenCalled();
+      expect((await app.request('/api/auth/logout', { method: 'POST', headers }, passwordEnv)).status).toBe(204);
+      expect(prepare).not.toHaveBeenCalled();
+    }
+  });
+
   it('rejects a Google credential with the wrong audience', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
       aud: 'other-client-id',
@@ -242,10 +618,47 @@ describe('Cloudflare Worker shell', () => {
     })));
 
     const result = await verifyGoogleIdToken({
-      GOOGLE_CLIENT_ID: 'expected-client-id',
+      GOOGLE_AUTH_CLIENT_ID: 'expected-client-id',
     } as never, 'token');
 
     expect(result).toBeNull();
+  });
+
+  it('rejects a Google credential issued for the mail client', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+      aud: 'mail-client-id',
+      email: 'admin@example.com',
+      email_verified: 'true',
+    })));
+
+    const result = await verifyGoogleIdToken({
+      GOOGLE_AUTH_CLIENT_ID: 'sign-in-client-id',
+      GOOGLE_CLIENT_ID: 'mail-client-id',
+    } as never, 'token');
+
+    expect(result).toBeNull();
+  });
+
+  it('does not enable Google sign-in with only mail credentials', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    const mailEnv = {
+      FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
+      GOOGLE_CLIENT_ID: 'mail-client-id',
+      GOOGLE_CLIENT_SECRET: 'mail-client-secret',
+      GOOGLE_REFRESH_TOKEN: 'mail-refresh-token',
+      ADMIN_PASSWORD: 'super-secret',
+    } as never;
+
+    await expect(verifyGoogleIdToken(mailEnv, 'token')).resolves.toBeNull();
+    const response = await app.request('/api/auth/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential: 'google-id-token' }),
+    }, mailEnv);
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: 'Google sign-in is not configured' });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('rejects a Google credential for an email outside the allowlist', async () => {
@@ -256,8 +669,9 @@ describe('Cloudflare Worker shell', () => {
     })));
 
     const result = await verifyGoogleIdToken({
-      GOOGLE_CLIENT_ID: 'expected-client-id',
+      GOOGLE_AUTH_CLIENT_ID: 'expected-client-id',
       ADMIN_ALLOWED_EMAILS: 'admin@example.com, organiser@example.com',
+      DB: createReservationDb(),
     } as never, 'token');
 
     expect(result).toBeNull();
@@ -272,7 +686,8 @@ describe('Cloudflare Worker shell', () => {
 
     const googleEnv = {
       FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
-      GOOGLE_CLIENT_ID: 'expected-client-id',
+      GOOGLE_AUTH_CLIENT_ID: 'expected-client-id',
+      GOOGLE_CLIENT_ID: 'mail-client-id',
       ADMIN_ALLOWED_EMAILS: 'admin@example.com',
       ADMIN_PASSWORD: 'super-secret',
       DB: createReservationDb(),
@@ -303,10 +718,24 @@ describe('Cloudflare Worker shell', () => {
       body: JSON.stringify({ credential: 'google-id-token' }),
     }, {
       FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
-      GOOGLE_CLIENT_ID: 'expected-client-id',
+      GOOGLE_AUTH_CLIENT_ID: 'expected-client-id',
     } as never);
 
     expect(response.status).toBe(500);
+  });
+
+  it('clears Google session cookies when the sign-in client is configured', async () => {
+    const response = await app.request('/api/auth/logout', {
+      method: 'POST',
+      headers: { Origin: 'https://example.github.io' },
+    }, {
+      FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
+      GOOGLE_AUTH_CLIENT_ID: 'sign-in-client-id',
+    } as never);
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get('set-cookie')).toContain('hpn_admin_google_session=;');
+    expect(response.headers.get('set-cookie')).toContain('Max-Age=0');
   });
 
   it('encodes Gmail MIME content as base64url', () => {
@@ -327,6 +756,7 @@ describe('Cloudflare Worker shell', () => {
       FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
       EMAIL_DELIVERY: 'gmail',
       GOOGLE_CLIENT_ID: 'client-id',
+      GOOGLE_AUTH_CLIENT_ID: 'sign-in-client-id',
       GOOGLE_CLIENT_SECRET: 'client-secret',
       GOOGLE_REFRESH_TOKEN: 'refresh-token',
       GOOGLE_SENDER_EMAIL: 'dorienmc@gmail.com',
@@ -335,6 +765,12 @@ describe('Cloudflare Worker shell', () => {
     expect(fetchMock).toHaveBeenCalledWith('https://oauth2.googleapis.com/token', expect.objectContaining({
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: 'client-id',
+        client_secret: 'client-secret',
+        refresh_token: 'refresh-token',
+        grant_type: 'refresh_token',
+      }),
     }));
     expect(fetchMock).toHaveBeenCalledWith('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', expect.objectContaining({
       method: 'POST',
@@ -353,7 +789,9 @@ describe('Cloudflare Worker shell', () => {
   });
 
   it('allows local reservations without a reCAPTCHA secret', async () => {
-    await expect(verifyRecaptcha({ LOCAL_ADMIN_AUTH: 'true' } as never, undefined)).resolves.toBe(true);
+    await expect(verifyRecaptcha({
+      MOCK_GOOGLE_LOGIN: 'true', FRONTEND_URL: 'http://localhost:5173/hpn-ticket-service/',
+    } as never, undefined)).resolves.toBe(true);
   });
 
   it('verifies reCAPTCHA tokens with Google when a secret is configured', async () => {
@@ -451,7 +889,7 @@ describe('Cloudflare Worker shell', () => {
       body: JSON.stringify({ name: 'Test Customer', email: 'customer@example.com', quantity: 2 }),
     }, {
       FRONTEND_URL: 'http://localhost:5173/hpn-ticket-service',
-      LOCAL_ADMIN_AUTH: 'true',
+      MOCK_GOOGLE_LOGIN: 'true',
       EMAIL_DELIVERY: 'mailpit',
       MAILPIT_API_URL: 'http://mailpit:8025',
       DB: createReservationDb(),
@@ -472,7 +910,7 @@ describe('Cloudflare Worker shell', () => {
       body: JSON.stringify({ name: 'Test Customer', email: 'customer@example.com', quantity: 6 }),
     }, {
       FRONTEND_URL: 'http://localhost:5173/hpn-ticket-service',
-      LOCAL_ADMIN_AUTH: 'true',
+      MOCK_GOOGLE_LOGIN: 'true',
       MAX_TICKETS_PER_RESERVATION: '10',
     } as never);
 
