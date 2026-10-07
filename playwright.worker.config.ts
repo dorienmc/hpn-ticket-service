@@ -7,9 +7,9 @@ const frontendUrl = 'http://localhost:5180/hpn-ticket-service/';
 const apiUrl = 'http://localhost:8789';
 process.env.E2E_API_URL = apiUrl;
 process.env.E2E_MAILPIT_URL = 'http://127.0.0.1:8030';
-const stateDirectoryRoot = process.env.E2E_STATE_DIR ?? tmpdir();
-mkdirSync(stateDirectoryRoot, { recursive: true });
-process.env.E2E_STATE_DIR = mkdtempSync(join(stateDirectoryRoot, 'hpn-worker-e2e-'));
+const stateDirectory = process.env.E2E_STATE_DIR ?? mkdtempSync(join(tmpdir(), 'hpn-worker-e2e-'));
+mkdirSync(stateDirectory, { recursive: true });
+process.env.E2E_STATE_DIR = stateDirectory;
 
 export default defineConfig({
   testDir: './e2e',
