@@ -21,14 +21,51 @@ const reservation: ReservationRecord = {
   notes: null,
 } as const;
 
-function createReservationDb(reservationToFind = reservation) {
+function createReservationDb(
+  reservationToFind = reservation,
+  ticketCount = reservationToFind.status === 'PAID' ? reservationToFind.quantity : 0,
+) {
   let storedReservation = reservationToFind;
+  let orderDeleted = false;
+  let storedTicketCount = ticketCount;
   let storedEmails: string | null = null;
   const revokedSessions = new Set<string>();
 
   function createPreparedResult(statement: string, args: unknown[]) {
     return {
       async run() {
+        if (statement.includes("UPDATE orders SET status = 'CANCELLED'")) {
+          if (storedReservation.status === 'RESERVED' || storedReservation.status === 'PAID') {
+            storedReservation = { ...storedReservation, status: 'CANCELLED' };
+            return { meta: { changes: 1 } };
+          }
+          return { meta: { changes: 0 } };
+        }
+        if (statement.includes('DELETE FROM tickets')) {
+          if (statement.includes('EXISTS (SELECT 1 FROM orders')
+            && storedReservation.status === 'CANCELLED'
+            && storedReservation.id === args[0]
+            && storedReservation.id === args[1]) {
+            const changes = storedTicketCount;
+            storedTicketCount = 0;
+            return { meta: { changes } };
+          }
+          if (!statement.includes('EXISTS (SELECT 1 FROM orders')
+            && storedReservation.id === args[0]) {
+            const changes = storedTicketCount;
+            storedTicketCount = 0;
+            return { meta: { changes } };
+          }
+          return { meta: { changes: 0 } };
+        }
+        if (statement.includes('DELETE FROM orders')) {
+          if ((storedReservation.status === 'CANCELLED' || storedReservation.status === 'EXPIRED')
+            && storedReservation.order_number === args[0]) {
+            orderDeleted = true;
+            return { meta: { changes: 1 } };
+          }
+          return { meta: { changes: 0 } };
+        }
         if (statement.includes('INSERT OR IGNORE INTO admin_session_revocations')) {
           revokedSessions.add(String(args[0]));
         }
@@ -68,13 +105,25 @@ function createReservationDb(reservationToFind = reservation) {
           } as T;
         }
         if (statement.includes('SELECT * FROM orders WHERE order_number')) {
-          return storedReservation as T;
+          return (orderDeleted ? null : storedReservation) as T;
         }
         return null as T;
       },
       async all<T>() {
         if (statement.includes('SELECT * FROM orders ORDER BY created_at DESC')) {
-          return { results: [storedReservation] as T[] };
+          return { results: (orderDeleted ? [] : [storedReservation]) as T[] };
+        }
+        if (statement.includes('SELECT tickets.* FROM tickets')) {
+          return {
+            results: Array.from({ length: storedTicketCount }, (_, index) => ({
+              id: index + 1,
+              order_id: storedReservation.id,
+              ticket_code: `TICKET-${index + 1}`,
+              status: 'VALID',
+              created_at: storedReservation.created_at,
+              used_at: null,
+            })) as T[],
+          };
         }
         return { results: [] as T[] };
       },
@@ -829,6 +878,15 @@ describe('Cloudflare Worker shell', () => {
     }, env);
 
     expect(response.headers.get('access-control-allow-origin')).toBe('https://example.github.io');
+
+    const deletePreflight = await app.request('/api/admin/orders/HP9-1234-ABCD', {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://example.github.io',
+        'Access-Control-Request-Method': 'DELETE',
+      },
+    }, env);
+    expect(deletePreflight.headers.get('access-control-allow-methods')).toContain('DELETE');
   });
 
   it('rejects cross-site admin mutations even with a valid admin session', async () => {
@@ -855,6 +913,97 @@ describe('Cloudflare Worker shell', () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toEqual({ error: 'Cross-site admin requests are not allowed' });
+  });
+
+  it('cancels paid orders and invalidates their tickets', async () => {
+    const bindings = {
+      FRONTEND_URL: 'http://localhost:5173/hpn-ticket-service/',
+      ADMIN_PASSWORD: 'local-test-password',
+      DB: createReservationDb({ ...reservation, status: 'PAID', paid_at: '2026-09-23T11:00:00.000Z' }),
+    };
+    const login = await app.request('/api/auth/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: bindings.ADMIN_PASSWORD }),
+    }, bindings);
+    const cookie = login.headers.get('set-cookie')!.split(';')[0];
+
+    const response = await app.request('/api/admin/orders/HP9-1234-ABCD/cancel', {
+      method: 'POST',
+      headers: { Cookie: cookie, Origin: 'http://localhost:5173' },
+    }, bindings);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ orderNumber: 'HP9-1234-ABCD', status: 'CANCELLED' });
+    const ordersResponse = await app.request('/api/admin/orders', { headers: { Cookie: cookie } }, bindings);
+    const { orders } = await ordersResponse.json<{ orders: Array<{ status: string; tickets: unknown[] }> }>();
+    expect(orders[0].status).toBe('CANCELLED');
+    expect(orders[0].tickets).toEqual([]);
+  });
+
+  it('still cancels reserved orders', async () => {
+    const bindings = {
+      FRONTEND_URL: 'http://localhost:5173/hpn-ticket-service/',
+      ADMIN_PASSWORD: 'local-test-password',
+      DB: createReservationDb(),
+    };
+    const login = await app.request('/api/auth/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: bindings.ADMIN_PASSWORD }),
+    }, bindings);
+    const cookie = login.headers.get('set-cookie')!.split(';')[0];
+
+    const response = await app.request('/api/admin/orders/HP9-1234-ABCD/cancel', {
+      method: 'POST',
+      headers: { Cookie: cookie, Origin: 'http://localhost:5173' },
+    }, bindings);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ orderNumber: 'HP9-1234-ABCD', status: 'CANCELLED' });
+  });
+
+  it('removes cancelled and expired orders and rejects non-archived orders', async () => {
+    const bindings = {
+      FRONTEND_URL: 'http://localhost:5173/hpn-ticket-service/',
+      ADMIN_PASSWORD: 'local-test-password',
+      DB: createReservationDb({ ...reservation, status: 'CANCELLED' }, 2),
+    };
+    const login = await app.request('/api/auth/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: bindings.ADMIN_PASSWORD }),
+    }, bindings);
+    const cookie = login.headers.get('set-cookie')!.split(';')[0];
+
+    const response = await app.request('/api/admin/orders/HP9-1234-ABCD', {
+      method: 'DELETE',
+      headers: { Cookie: cookie, Origin: 'http://localhost:5173' },
+    }, bindings);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ orderNumber: 'HP9-1234-ABCD', deleted: true });
+    const ordersResponse = await app.request('/api/admin/orders', { headers: { Cookie: cookie } }, bindings);
+    await expect(ordersResponse.json()).resolves.toEqual({ orders: [] });
+
+    const expiredEnv = {
+      ...bindings,
+      DB: createReservationDb({ ...reservation, status: 'EXPIRED' }, 0),
+    };
+    const expiredResponse = await app.request('/api/admin/orders/HP9-1234-ABCD', {
+      method: 'DELETE',
+      headers: { Cookie: cookie, Origin: 'http://localhost:5173' },
+    }, expiredEnv);
+    expect(expiredResponse.status).toBe(200);
+    await expect(expiredResponse.json()).resolves.toEqual({ orderNumber: 'HP9-1234-ABCD', deleted: true });
+
+    const nonCancelledEnv = { ...bindings, DB: createReservationDb(reservation) };
+    const rejected = await app.request('/api/admin/orders/HP9-1234-ABCD', {
+      method: 'DELETE',
+      headers: { Cookie: cookie, Origin: 'http://localhost:5173' },
+    }, nonCancelledEnv);
+    expect(rejected.status).toBe(400);
+    await expect(rejected.json()).resolves.toEqual({ error: 'Only cancelled or expired orders can be removed' });
   });
 
   it('escapes untrusted reservation names in HTML email output', async () => {

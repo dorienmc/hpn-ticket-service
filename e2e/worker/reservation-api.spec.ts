@@ -76,6 +76,22 @@ test('expires stale reservations and releases their capacity (former expiry test
   expect((await (await request.get(`${api}/api/capacity`)).json()).available).toBe(before.available);
 });
 
+test('deletes an expired order from the admin archive', async ({ request, page }) => {
+  const order = await reserve(request, 1);
+  executeSql(`UPDATE orders SET expires_at = '2000-01-01T00:00:00.000Z' WHERE order_number = '${order.orderNumber}'`);
+
+  await page.goto(`${api}/api/auth/google?email=${encodeURIComponent('dorienmc@gmail.com')}`);
+  await expect(page).toHaveURL(/\/hpn-ticket-service\/admin$/);
+  await expect(page.getByRole('heading', { name: 'Overzicht reserveringen' })).toBeVisible();
+  await page.getByRole('link', { name: 'Verlopen / geannuleerd' }).click();
+
+  const orderRow = page.getByRole('row').filter({ hasText: order.orderNumber });
+  await expect(orderRow).toContainText('Verlopen');
+  page.once('dialog', (dialog) => dialog.accept());
+  await orderRow.getByRole('button', { name: 'Verwijder order' }).click();
+  await expect(orderRow).toHaveCount(0);
+});
+
 test('lists orders, pays idempotently, creates unique tickets and checks in once (former paid-order test)', async ({ request }) => {
   const order = await reserve(request, 3);
   await login(request);

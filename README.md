@@ -275,6 +275,7 @@ From there you can:
 - see the current list of orders
 - verify status values such as RESERVED, PAID, EXPIRED, and CANCELLED
 - mark a reservation as paid with the action button for reserved orders
+- cancel reserved or paid orders (paid-order tickets are invalidated; this does not issue a refund), then permanently remove cancelled or expired orders from the archive
 
 ### 5. Re-check the private page after payment
 

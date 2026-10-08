@@ -351,12 +351,17 @@ async function initApp() {
                                 <div class="admin-actions">
                                   <button class="admin-button" data-action="open-tickets" data-order="${order.order_number}"><span aria-hidden="true">🎫</span> Tickets inchecken</button>
                                   <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}"><span aria-hidden="true">✉️</span> Opnieuw sturen</button>
+                                  <button class="admin-button danger" data-action="cancel" data-order="${order.order_number}"><span aria-hidden="true">✕</span> Annuleer</button>
                                 </div>
                               `;
                             })()
-                        : `<div class="admin-actions">
-                            <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}"><span aria-hidden="true">✉️</span> Opnieuw sturen</button>
-                          </div>`}
+                        : order.status === 'CANCELLED' || order.status === 'EXPIRED'
+                          ? `<div class="admin-actions">
+                              <button class="admin-button danger" data-action="remove" data-order="${order.order_number}"><span aria-hidden="true">🗑️</span> Verwijder order</button>
+                            </div>`
+                          : `<div class="admin-actions">
+                              <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}"><span aria-hidden="true">✉️</span> Opnieuw sturen</button>
+                            </div>`}
                     </td>
                   </tr>
                 `).join('')}
@@ -448,18 +453,22 @@ async function initApp() {
                 return;
               }
 
+              const order = orders.find((candidate: any) => candidate.order_number === orderNumber);
               const confirmation = action === 'cancel'
-                ? `Reservering ${orderNumber} annuleren? De tickets komen dan weer beschikbaar.`
-                : undefined;
+                ? `Order ${orderNumber} annuleren?${order?.status === 'PAID' ? ' Dit stort geen betaling terug; de ticketcodes worden ongeldig gemaakt en de capaciteit komt weer beschikbaar.' : ' De capaciteit komt weer beschikbaar.'}`
+                : action === 'remove'
+                  ? `Geannuleerde order ${orderNumber} definitief verwijderen? Dit kan niet ongedaan worden gemaakt.`
+                  : undefined;
 
               if (confirmation && !window.confirm(confirmation)) {
                 return;
               }
 
               button.disabled = true;
-              const endpoint = `${baseUrl}/api/admin/orders/${encodeURIComponent(orderNumber)}/${action}`;
+              const orderEndpoint = `${baseUrl}/api/admin/orders/${encodeURIComponent(orderNumber)}`;
+              const endpoint = action === 'remove' ? orderEndpoint : `${orderEndpoint}/${action}`;
               const response = await fetch(endpoint, {
-                method: 'POST',
+                method: action === 'remove' ? 'DELETE' : 'POST',
                 credentials: 'include',
                 headers: action === 'extend' ? { 'Content-Type': 'application/json' } : undefined,
                 body: action === 'extend' ? JSON.stringify({ hours: 24 }) : undefined,

@@ -410,7 +410,7 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
 
 app.use('/api/*', async (context, next) => cors({
   origin: frontendOrigin(context.env),
-  allowMethods: ['GET', 'POST', 'OPTIONS'],
+  allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type'],
   credentials: true,
 })(context, next));
@@ -722,10 +722,41 @@ app.post('/api/admin/orders/:orderNumber/pay', async (context) => {
 
 app.post('/api/admin/orders/:orderNumber/cancel', async (context) => {
   const value = context.req.param('orderNumber');
-  const result = await context.env.DB.prepare("UPDATE orders SET status = 'CANCELLED' WHERE order_number = ? AND status = 'RESERVED'")
-    .bind(value).run();
-  if (!result.meta.changes) return context.json({ error: 'Only active reserved orders can be cancelled' }, 400);
+  const reservation = await context.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?')
+    .bind(value).first<ReservationRecord>();
+  if (!reservation) return context.json({ error: 'Order not found' }, 404);
+  if (reservation.status !== 'RESERVED' && reservation.status !== 'PAID') {
+    return context.json({ error: 'Only reserved or paid orders can be cancelled' }, 400);
+  }
+
+  const [result] = await context.env.DB.batch([
+    context.env.DB.prepare("UPDATE orders SET status = 'CANCELLED' WHERE order_number = ? AND status IN ('RESERVED', 'PAID')")
+      .bind(value),
+    context.env.DB.prepare(`
+      DELETE FROM tickets
+      WHERE order_id = ?
+        AND EXISTS (SELECT 1 FROM orders WHERE id = ? AND status = 'CANCELLED')
+    `).bind(reservation.id, reservation.id),
+  ]);
+  if (!result.meta.changes) return context.json({ error: 'Only reserved or paid orders can be cancelled' }, 400);
   return context.json({ orderNumber: value, status: 'CANCELLED' });
+});
+
+app.delete('/api/admin/orders/:orderNumber', async (context) => {
+  const value = context.req.param('orderNumber');
+  const reservation = await context.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?')
+    .bind(value).first<ReservationRecord>();
+  if (!reservation) return context.json({ error: 'Order not found' }, 404);
+  if (reservation.status !== 'CANCELLED' && reservation.status !== 'EXPIRED') {
+    return context.json({ error: 'Only cancelled or expired orders can be removed' }, 400);
+  }
+
+  const [, result] = await context.env.DB.batch([
+    context.env.DB.prepare('DELETE FROM tickets WHERE order_id = ?').bind(reservation.id),
+    context.env.DB.prepare("DELETE FROM orders WHERE order_number = ? AND status IN ('CANCELLED', 'EXPIRED')").bind(value),
+  ]);
+  if (!result.meta.changes) return context.json({ error: 'Only cancelled or expired orders can be removed' }, 400);
+  return context.json({ orderNumber: value, deleted: true });
 });
 
 app.post('/api/admin/orders/:orderNumber/extend', async (context) => {
