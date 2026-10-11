@@ -576,7 +576,7 @@ async function initApp() {
               <ul class="ticket-list">
                 ${payload.tickets.map((ticket: { ticket_code: string; status: string }) => `
                   <li id="ticket-${escapeHtml(ticket.ticket_code)}">
-                    <span><strong>${escapeHtml(ticket.ticket_code)}</strong><span>${statusLabel(ticket.status)}</span></span>
+                    <span><strong>${escapeHtml(ticket.ticket_code)}</strong> <span>${statusLabel(ticket.status)}</span></span>
                     ${isAdmin && ticket.status !== 'USED'
                       ? `<button class="admin-button secondary" data-checkin-ticket="${escapeHtml(ticket.ticket_code)}"><span aria-hidden="true">🎫</span> Ticket inchecken</button>`
                       : ''}

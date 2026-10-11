@@ -137,6 +137,7 @@ test('customer status page reflects paid status and ticket check-in state', asyn
   await expect(ticketItems).toHaveCount(2);
   await expect(ticketItems.filter({ hasText: 'Geldig' })).toHaveCount(2);
   await expect(ticketItems.filter({ hasText: 'Ingecheckt' })).toHaveCount(0);
+  await expect(ticketItems.first().locator(':scope > span')).toHaveText(/\S+ Geldig$/);
 
   await page.goto('admin');
   await page.locator('#admin-tabs').getByRole('link', { name: 'Betaald', exact: true }).click();
@@ -166,6 +167,7 @@ test('customer status page reflects paid status and ticket check-in state', asyn
   const refreshedTicketItems = page.locator('.ticket-list li');
   await expect(refreshedTicketItems.filter({ hasText: 'Ingecheckt' })).toHaveCount(1);
   await expect(refreshedTicketItems.filter({ hasText: 'Geldig' })).toHaveCount(1);
+  await expect(refreshedTicketItems.filter({ hasText: 'Ingecheckt' }).locator(':scope > span')).toHaveText(/\S+ Ingecheckt$/);
   const reservationPageCheckin = page.getByRole('button', { name: 'Ticket inchecken' });
   await expect(reservationPageCheckin).toHaveCount(1);
   await Promise.all([
