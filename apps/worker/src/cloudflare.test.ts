@@ -873,6 +873,11 @@ describe('Cloudflare Worker shell', () => {
     const payload = JSON.parse(String(request.body));
     expect(payload.HTML).toContain('HALF PAST NINE');
     expect(payload.HTML).toContain('background-color:#087b76');
+    expect(payload.HTML).toContain('De penningmeester gaat nu handmatig checken of de betaling ontvangen is');
+    expect(payload.HTML).toContain('Na confirmatie ontvang je een mail met de tickets.');
+    expect(payload.HTML).toContain('Dit is een automatisch gegenereerde mail.');
+    expect(payload.HTML).toContain('Half Past Nine<br><span');
+    expect(payload.HTML).toContain('Nog niet betaald? Dan kan dit ook via die link.');
     expect(payload.HTML).toContain('Open je reserveringspagina');
     expect(payload.HTML).toContain('href="https://example.github.io/hpn-ticket-service/payment/');
     expect(payload.HTML).toContain('&lt;img src=x onerror=alert(1)&gt;');
