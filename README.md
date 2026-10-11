@@ -94,7 +94,7 @@ Local backend defaults come from the `vars` block in `apps/worker/wrangler.local
 | `TOTAL_CAPACITY` | `100` | Maximum number of tickets |
 | `MAX_TICKETS_PER_RESERVATION` | `5` | Maximum tickets in one reservation |
 | `TICKET_PRICE_CENTS` | `1000` | Price per ticket in cents |
-| `RESERVATION_TTL_HOURS` | `48` | Reservation lifetime before expiry |
+| `RESERVATION_TTL_HOURS` | `336` | Reservation lifetime before expiry (two weeks) |
 | `ING_PAYMENT_LINK_1` | Demo URL | ING payment link for a 1-ticket reservation |
 | `ING_PAYMENT_LINK_2` | Demo URL | ING payment link for a 2-ticket reservation |
 | `ING_PAYMENT_LINK_3` | Demo URL | ING payment link for a 3-ticket reservation |

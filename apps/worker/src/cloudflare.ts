@@ -563,7 +563,7 @@ app.post('/api/reservations', async (context) => {
       quantity,
       amountCents: quantity * numberFromEnv(context.env.TICKET_PRICE_CENTS, 1000),
       createdAt: now.toISOString(),
-      expiresAt: addHours(now, numberFromEnv(context.env.RESERVATION_TTL_HOURS, 48)),
+      expiresAt: addHours(now, numberFromEnv(context.env.RESERVATION_TTL_HOURS, 336)),
     };
     const reservation = await context.env.DB.prepare(`
       INSERT INTO orders (order_number, access_token, name, email, quantity, amount_cents, status, created_at, expires_at, paid_at, notes)
