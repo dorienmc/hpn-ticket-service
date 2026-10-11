@@ -145,7 +145,7 @@ test('customer status page reflects paid status and ticket check-in state', asyn
   const messagesBeforeResend = await countMailMessages();
   const [resendResponse] = await Promise.all([
     page.waitForResponse((response) => response.url().includes(`/api/admin/orders/${reservation.orderNumber}/resend`)),
-    paidOrderRow.getByRole('button', { name: 'Betalingsmail opnieuw verzenden' }).click(),
+    paidOrderRow.getByRole('button', { name: 'Ticketmail opnieuw verzenden' }).click(),
   ]);
   expect(resendResponse.ok()).toBeTruthy();
   await page.waitForLoadState('networkidle');

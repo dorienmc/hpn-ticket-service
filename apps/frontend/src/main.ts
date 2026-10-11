@@ -361,7 +361,7 @@ async function initApp() {
                                 <div class="ticket-progress">${usedCount}/${tickets.length} ingecheckt</div>
                                 <div class="admin-actions">
                                   <button class="admin-button" data-action="open-tickets" data-order="${order.order_number}"><span aria-hidden="true">🎫</span> Tickets inchecken</button>
-                                  <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}"><span aria-hidden="true">✉️</span> Betalingsmail opnieuw verzenden</button>
+                                  <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}"><span aria-hidden="true">✉️</span> Ticketmail opnieuw verzenden</button>
                                   <button class="admin-button danger" data-action="cancel" data-order="${order.order_number}"><span aria-hidden="true">✕</span> Annuleer</button>
                                 </div>
                               `;
