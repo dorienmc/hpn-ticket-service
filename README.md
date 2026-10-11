@@ -19,13 +19,13 @@ This project is configured for Node 24 via the repository's `.nvmrc` file and th
 
 ## TODOs
 
-- [ ] Send mail after payment is confirmed?
+- [x] Send mail after payment is confirmed
 - [x] Styling on ticket form and admin ui
 - [x] Use HP9 styling in emails
 - [x] Get things working in production
 - [x] CI/CD pipeline (GitHub Actions: worker tests/build, frontend build, e2e)
 - [ ] Ticket QR code support
-- [x] Ticket check-in support (manual check-in via admin UI)
+- [x] Ticket check-in support (admin UI and private reservation page)
 - [x] Use the same Worker backend for local development, testing and production
 - [ ] Split up main.ts into several pages
 
@@ -279,7 +279,9 @@ From there you can:
 
 ### 5. Re-check the private page after payment
 
-After marking an order paid from the admin page, refresh the reservation page or reopen the private link. The status should change to PAID.
+After marking an order paid from the admin page, refresh the reservation page or reopen the private link. The status should change to PAID. A payment confirmation email is sent with the concert date, time and venue, a link to the private reservation page, and a link for each ticket that opens that ticket on the reservation page. QR codes are not currently included.
+
+When signed in as an admin, each valid ticket on the private reservation page has a **Ticket inchecken** button. It uses the same admin check-in endpoint as the admin overview. Customers who are not signed in as an admin only see ticket status.
 
 ## Useful commands
 

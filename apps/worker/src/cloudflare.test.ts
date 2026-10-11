@@ -77,6 +77,15 @@ function createReservationDb(
           && storedReservation.expires_at <= String(args[0])) {
           storedReservation = { ...storedReservation, status: 'EXPIRED' };
         }
+        if (statement.includes("UPDATE orders SET status = 'PAID'")) {
+          if (storedReservation.status === 'PAID') return { meta: { changes: 0 } };
+          storedReservation = { ...storedReservation, status: 'PAID', paid_at: String(args[0]) };
+          return { meta: { changes: 1 } };
+        }
+        if (statement.includes('INSERT INTO tickets')) {
+          storedTicketCount += 1;
+          return { meta: { changes: 1 } };
+        }
         return { meta: { changes: 1 } };
       },
       async first<T>() {
@@ -88,6 +97,9 @@ function createReservationDb(
         }
         if (statement.includes('SELECT COALESCE(SUM(quantity), 0) AS active_quantity')) {
           return { active_quantity: 0 } as T;
+        }
+        if (statement.includes('SELECT COUNT(*) AS count FROM tickets')) {
+          return { count: storedTicketCount } as T;
         }
         if (statement.includes('INSERT INTO orders')) {
           const [orderNumber, accessToken, name, email, quantity, amountCents, createdAt, expiresAt] = args;
@@ -831,6 +843,45 @@ describe('Cloudflare Worker shell', () => {
     expect(payload.raw).toEqual(expect.any(String));
     const mime = Buffer.from(payload.raw, 'base64url').toString();
     expect(mime).toContain('From: Dorien Lorijn namens Half Past Nine <dorienmc@gmail.com>');
+  });
+
+  it('sends one payment confirmation with concert details and links to individual tickets', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 202 }));
+    const bindings = {
+      FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
+      EMAIL_DELIVERY: 'mailpit',
+      MAILPIT_API_URL: 'http://mailpit:8025',
+      ADMIN_PASSWORD: 'test-admin-password',
+      DB: createReservationDb(),
+    };
+    const loginResponse = await app.request('/api/auth/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: bindings.ADMIN_PASSWORD }),
+    }, bindings as never);
+    const cookie = loginResponse.headers.get('set-cookie')!.split(';')[0];
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await app.request(`/api/admin/orders/${reservation.order_number}/pay`, {
+        method: 'POST',
+        headers: { Cookie: cookie, Origin: 'https://example.github.io' },
+      }, bindings as never);
+      expect(response.status).toBe(200);
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const email = JSON.parse(String(request.body));
+    expect(email.Subject).toContain('Je tickets');
+    expect(email.HTML).toContain('Je betaling van €20.00 is ontvangen');
+    expect(email.HTML).toContain('zondag 8 november 2026 om 15:00 uur');
+    expect(email.HTML).toContain('Twekkelerpoort – Lambertus, Buddestraat 1, 7521 SB Enschede');
+    expect(email.HTML).toContain(`/payment/${reservation.order_number}/${reservation.access_token}`);
+    expect(email.HTML).toContain('#ticket-TICKET-1');
+    expect(email.HTML).toContain('#ticket-TICKET-2');
+    expect(email.HTML).toContain('Bekijk dit ticket');
+    expect(email.HTML).not.toContain('De penningmeester gaat nu handmatig checken');
+    expect(email.HTML).not.toContain('Nog niet betaald?');
   });
 
   it('requires a reCAPTCHA secret outside local development', async () => {

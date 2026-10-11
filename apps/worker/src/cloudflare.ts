@@ -295,7 +295,37 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
 
   const paymentUrl = frontendUrl(env, `payment/${reservation.order_number}/${reservation.access_token}`);
   const amountEuros = (reservation.amount_cents / 100).toFixed(2);
-  const subject = `Je reservering voor het dubbelconcert van Half Past Nine & Diva Power (${reservation.order_number})`;
+  const isPaid = reservation.status === 'PAID';
+  const subject = isPaid
+    ? `Je tickets voor het dubbelconcert van Half Past Nine & Diva Power (${reservation.order_number})`
+    : `Je reservering voor het dubbelconcert van Half Past Nine & Diva Power (${reservation.order_number})`;
+  const ticketSection = isPaid
+    ? `
+      <p style="margin:0 0 20px;color:#4b5563;font-size:16px;line-height:1.6;">Je betaling van €${amountEuros} is ontvangen. We zien je graag op zondag 8 november 2026 om 15:00 uur bij Twekkelerpoort – Lambertus, Buddestraat 1, 7521 SB Enschede.</p>
+      <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.6;">Ordernummer: <strong style="color:#101010;">${escapeHtml(reservation.order_number)}</strong></p>
+      <h2 style="margin:0 0 12px;color:#101010;font-size:20px;">Je tickets</h2>
+      <ul style="margin:0 0 24px;padding-left:20px;color:#4b5563;font-size:14px;line-height:1.8;">
+        ${(await ticketsForOrder(env.DB, reservation.order_number)).map((ticket) => {
+          const ticketUrl = `${paymentUrl}#ticket-${encodeURIComponent(ticket.ticket_code)}`;
+          return `<li><strong style="color:#101010;">${escapeHtml(ticket.ticket_code)}</strong> — <a href="${escapeHtml(ticketUrl)}" style="color:#087b76;">Bekijk dit ticket</a></li>`;
+        }).join('')}
+      </ul>
+      <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.6;">Je kunt je reservering en alle tickets altijd bekijken via je persoonlijke reserveringspagina.</p>
+    `
+    : `
+      <p style="margin:0 0 24px;color:#4b5563;font-size:16px;line-height:1.6;">Je reservering voor ${reservation.quantity} ticket(s) is aangemaakt.</p>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 22px;background-color:#f8f6ed;border:1px solid #e7e1cc;">
+        <tr>
+          <td style="padding:12px 14px;border-bottom:1px solid #e7e1cc;color:#4b5563;font-size:14px;">Ordernummer</td>
+          <td align="right" style="padding:12px 14px;border-bottom:1px solid #e7e1cc;color:#101010;font-size:14px;font-weight:bold;">${escapeHtml(reservation.order_number)}</td>
+        </tr>
+        <tr>
+          <td style="padding:12px 14px;color:#4b5563;font-size:14px;">Bedrag</td>
+          <td align="right" style="padding:12px 14px;color:#101010;font-size:14px;font-weight:bold;">€${amountEuros}</td>
+        </tr>
+      </table>
+      <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.6;">De penningmeester gaat nu handmatig checken of de betaling ontvangen is, dit kan enkele dagen duren. Na confirmatie ontvang je een mail met de tickets. De huidige status van de reservering kun je zien op je reserveringspagina. Nog niet betaald? Dan kan dit ook via die link.</p>
+    `;
   const html = `
     <div style="margin:0;padding:32px 12px;background-color:#f3f7f6;color:#172321;font-family:Arial,Helvetica,sans-serif;">
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
@@ -309,23 +339,12 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
               </tr>
               <tr>
                 <td style="padding:30px;">
-                  <h1 style="margin:0 0 12px;color:#101010;font-size:26px;line-height:1.25;">Bedankt, ${escapeHtml(reservation.name)}!</h1>
-                  <p style="margin:0 0 24px;color:#4b5563;font-size:16px;line-height:1.6;">Je reservering voor ${reservation.quantity} ticket(s) is aangemaakt.</p>
-                  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 22px;background-color:#f8f6ed;border:1px solid #e7e1cc;">
-                    <tr>
-                      <td style="padding:12px 14px;border-bottom:1px solid #e7e1cc;color:#4b5563;font-size:14px;">Ordernummer</td>
-                      <td align="right" style="padding:12px 14px;border-bottom:1px solid #e7e1cc;color:#101010;font-size:14px;font-weight:bold;">${reservation.order_number}</td>
-                    </tr>
-                    <tr>
-                      <td style="padding:12px 14px;color:#4b5563;font-size:14px;">Bedrag</td>
-                      <td align="right" style="padding:12px 14px;color:#101010;font-size:14px;font-weight:bold;">€${amountEuros}</td>
-                    </tr>
-                  </table>
-                  <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.6;">De penningmeester gaat nu handmatig checken of de betaling ontvangen is, dit kan enkele dagen duren. Na confirmatie ontvang je een mail met de tickets. De huidige status van de reservering kun je zien op je reserveringspagina. Nog niet betaald? Dan kan dit ook via die link.</p>
+                  <h1 style="margin:0 0 12px;color:#101010;font-size:26px;line-height:1.25;">${isPaid ? 'Je tickets zijn bevestigd' : `Bedankt, ${escapeHtml(reservation.name)}!`}</h1>
+                  ${ticketSection}
                   <table role="presentation" cellspacing="0" cellpadding="0" border="0">
                     <tr>
                       <td align="center" style="background-color:#f5c900;border:1px solid #101010;">
-                        <a href="${escapeHtml(paymentUrl)}" style="display:inline-block;padding:14px 20px;color:#101010;font-size:15px;font-weight:bold;text-decoration:none;">Open je reserveringspagina&nbsp; →</a>
+                        <a href="${escapeHtml(paymentUrl)}" style="display:inline-block;padding:14px 20px;color:#101010;font-size:15px;font-weight:bold;text-decoration:none;">${isPaid ? 'Bekijk je reservering' : 'Open je reserveringspagina'}&nbsp; →</a>
                       </td>
                     </tr>
                   </table>
@@ -613,6 +632,7 @@ app.get('/api/reservations/:orderNumber/:token', async (context) => {
     status: reservation.status,
     createdAt: reservation.created_at,
     expiresAt: reservation.expires_at,
+    paidAt: reservation.paid_at,
     expired: reservation.status === 'EXPIRED',
     paymentLink: paymentLink ?? null,
     tickets: reservation.status === 'PAID' ? await ticketsForOrder(context.env.DB, reservation.order_number) : [],
@@ -706,7 +726,7 @@ app.post('/api/admin/orders/:orderNumber/pay', async (context) => {
 
   const now = new Date().toISOString();
   const statements: D1PreparedStatement[] = [
-    context.env.DB.prepare("UPDATE orders SET status = 'PAID', paid_at = ? WHERE order_number = ?").bind(now, value),
+    context.env.DB.prepare("UPDATE orders SET status = 'PAID', paid_at = ? WHERE order_number = ? AND status != 'PAID'").bind(now, value),
   ];
   const existing = await context.env.DB.prepare('SELECT COUNT(*) AS count FROM tickets WHERE order_id = ?')
     .bind(reservation.id).first<{ count: number }>();
@@ -716,7 +736,14 @@ app.post('/api/admin/orders/:orderNumber/pay', async (context) => {
         .bind(reservation.id, ticketCode(), now));
     }
   }
-  await context.env.DB.batch(statements);
+  const results = await context.env.DB.batch(statements);
+  if (Number(results[0]?.meta.changes ?? 0) > 0) {
+    try {
+      await sendReservationEmail(context.env, { ...reservation, status: 'PAID', paid_at: now });
+    } catch (error) {
+      console.error('Payment confirmation email delivery failed', error);
+    }
+  }
   return context.json({ orderNumber: value, status: 'PAID', paidAt: now });
 });
 

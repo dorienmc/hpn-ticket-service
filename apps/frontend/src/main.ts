@@ -89,6 +89,17 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
+async function checkInTicket(ticketCode: string): Promise<void> {
+  const response = await fetch(`${baseUrl}/api/admin/tickets/${encodeURIComponent(ticketCode)}/use`, {
+    method: 'POST',
+    credentials: 'include',
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error || 'Ticket kon niet worden ingecheckt.');
+  }
+}
+
 async function initApp() {
   if (isPrivacyPath) {
     document.title = 'Privacyverklaring – Ticket Service Half Past Nine';
@@ -350,7 +361,7 @@ async function initApp() {
                                 <div class="ticket-progress">${usedCount}/${tickets.length} ingecheckt</div>
                                 <div class="admin-actions">
                                   <button class="admin-button" data-action="open-tickets" data-order="${order.order_number}"><span aria-hidden="true">🎫</span> Tickets inchecken</button>
-                                  <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}"><span aria-hidden="true">✉️</span> Opnieuw sturen</button>
+                                  <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}"><span aria-hidden="true">✉️</span> Betalingsmail opnieuw verzenden</button>
                                   <button class="admin-button danger" data-action="cancel" data-order="${order.order_number}"><span aria-hidden="true">✕</span> Annuleer</button>
                                 </div>
                               `;
@@ -372,18 +383,6 @@ async function initApp() {
           const ticketModal = document.querySelector<HTMLDialogElement>('#ticket-modal');
           const ticketModalTitle = document.querySelector<HTMLHeadingElement>('#ticket-modal-title');
           const ticketModalBody = document.querySelector<HTMLDivElement>('#ticket-modal-body');
-
-          async function checkinTicket(ticketCode: string) {
-            const response = await fetch(`${baseUrl}/api/admin/tickets/${encodeURIComponent(ticketCode)}/use`, {
-              method: 'POST',
-              credentials: 'include',
-            });
-            const payload = await response.json();
-            if (!response.ok) {
-              throw new Error(payload.error || 'Ticket kon niet worden ingecheckt.');
-            }
-            return payload;
-          }
 
           function renderTicketModal(order: any) {
             if (!ticketModal || !ticketModalBody || !ticketModalTitle) return;
@@ -410,7 +409,7 @@ async function initApp() {
               const targets = tickets.filter((ticket: any) => ticket.status !== 'USED');
               for (const ticket of targets) {
                 try {
-                  await checkinTicket(ticket.ticket_code);
+                  await checkInTicket(ticket.ticket_code);
                   ticket.status = 'USED';
                 } catch (error) {
                   alert(error instanceof Error ? error.message : 'Ticket kon niet worden ingecheckt.');
@@ -425,7 +424,7 @@ async function initApp() {
                 if (!ticketCode) return;
                 button.disabled = true;
                 try {
-                  await checkinTicket(ticketCode);
+                  await checkInTicket(ticketCode);
                   const ticket = tickets.find((candidate: any) => candidate.ticket_code === ticketCode);
                   if (ticket) ticket.status = 'USED';
                   window.location.reload();
@@ -528,11 +527,18 @@ async function initApp() {
           throw new Error(payload.error || 'Reservation not found');
         }
 
+        const sessionResponse = await fetch(`${baseUrl}/api/auth/session`, { credentials: 'include' });
+        if (!sessionResponse.ok) throw new Error('De beheerdersstatus kon niet worden gecontroleerd.');
+        const session = await sessionResponse.json();
+        const isAdmin = session.authenticated === true;
         const amount = (payload.amountCents / 100).toFixed(2);
         const expiresAt = new Date(payload.expiresAt).toLocaleString('nl-NL', {
           dateStyle: 'medium',
           timeStyle: 'short',
         });
+        const paidAt = payload.paidAt
+          ? new Date(payload.paidAt).toLocaleString('nl-NL', { dateStyle: 'medium', timeStyle: 'short' })
+          : null;
 
         const statusMarkup = payload.status === 'PAID'
           ? `<div class="badge success">Betaald</div>`
@@ -568,8 +574,16 @@ async function initApp() {
             <div class="payment-box success-box">
               <h2>Je tickets</h2>
               <ul class="ticket-list">
-                ${payload.tickets.map((ticket: { ticket_code: string; status: string }) => `<li><strong>${ticket.ticket_code}</strong><span>${statusLabel(ticket.status)}</span></li>`).join('')}
+                ${payload.tickets.map((ticket: { ticket_code: string; status: string }) => `
+                  <li id="ticket-${escapeHtml(ticket.ticket_code)}">
+                    <span><strong>${escapeHtml(ticket.ticket_code)}</strong><span>${statusLabel(ticket.status)}</span></span>
+                    ${isAdmin && ticket.status !== 'USED'
+                      ? `<button class="admin-button secondary" data-checkin-ticket="${escapeHtml(ticket.ticket_code)}"><span aria-hidden="true">🎫</span> Ticket inchecken</button>`
+                      : ''}
+                  </li>
+                `).join('')}
               </ul>
+              ${isAdmin ? '<p id="ticket-checkin-status" class="status" aria-live="polite"></p>' : ''}
             </div>
           `
           : '';
@@ -584,11 +598,37 @@ async function initApp() {
               <div><dt>E-mail</dt><dd>${escapeHtml(payload.email)}</dd></div>
               <div><dt>Tickets</dt><dd>${payload.quantity}</dd></div>
               <div><dt>Bedrag</dt><dd>€${amount}</dd></div>
+              ${paidAt ? `<div><dt>Betaald op</dt><dd>${escapeHtml(paidAt)}</dd></div>` : ''}
               <div><dt>Verloopt op</dt><dd>${expiresAt}</dd></div>
           </dl>
           ${paymentSection}
           ${ticketSection}
         `;
+
+        container.querySelectorAll<HTMLButtonElement>('[data-checkin-ticket]').forEach((button) => {
+          button.addEventListener('click', async () => {
+            const ticketCode = button.dataset.checkinTicket;
+            if (!ticketCode) return;
+            button.disabled = true;
+            const checkinStatus = container.querySelector<HTMLParagraphElement>('#ticket-checkin-status');
+            if (checkinStatus) checkinStatus.textContent = 'Ticket wordt ingecheckt...';
+            try {
+              await checkInTicket(ticketCode);
+              window.location.reload();
+            } catch (error) {
+              button.disabled = false;
+              if (checkinStatus) {
+                checkinStatus.textContent = error instanceof Error ? error.message : 'Ticket kon niet worden ingecheckt.';
+                checkinStatus.classList.add('error-message');
+              }
+            }
+          });
+        });
+
+        if (window.location.hash.startsWith('#ticket-')) {
+          const ticketCode = decodeURIComponent(window.location.hash.slice('#ticket-'.length));
+          container.querySelector(`#ticket-${CSS.escape(ticketCode)}`)?.scrollIntoView({ block: 'center' });
+        }
       } catch (error) {
         container.innerHTML = `
           <p class="error-message">${error instanceof Error ? error.message : 'Deze reservering kon niet worden gevonden.'}</p>

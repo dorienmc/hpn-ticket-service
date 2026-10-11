@@ -109,6 +109,8 @@ test('customer status page reflects paid status and ticket check-in state', asyn
 
   expect(response.ok()).toBeTruthy();
   const reservation = await response.json();
+  const mailSearchUrl = `${process.env.E2E_MAILPIT_URL || 'http://localhost:8025'}/api/v1/search?query=to:e2e-`;
+  const countMailMessages = async () => (await (await page.request.get(mailSearchUrl)).json()).messages_count;
 
   await page.goto(reservation.paymentUrl);
   await expect(page.getByText('Gereserveerd', { exact: true })).toBeVisible();
@@ -116,6 +118,7 @@ test('customer status page reflects paid status and ticket check-in state', asyn
   await expect(page.getByText('Voor deze reservering moet nog worden betaald.')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Je tickets' })).toHaveCount(0);
 
+  const messagesBeforePayment = await countMailMessages();
   await loginAsMockGoogleAdmin(page);
   const orderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
   await Promise.all([
@@ -123,6 +126,7 @@ test('customer status page reflects paid status and ticket check-in state', asyn
     orderRow.getByRole('button', { name: 'Markeer als betaald' }).click(),
   ]);
   await page.waitForLoadState('networkidle');
+  await expect.poll(countMailMessages).toBeGreaterThan(messagesBeforePayment);
 
   await page.goto(reservation.paymentUrl);
   await expect(page.getByText('Betaald', { exact: true })).toBeVisible();
@@ -138,7 +142,17 @@ test('customer status page reflects paid status and ticket check-in state', asyn
   await page.locator('#admin-tabs').getByRole('link', { name: 'Betaald', exact: true }).click();
   await expect(page).toHaveURL(/\?tab=PAID$/);
   const paidOrderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
-  await paidOrderRow.getByRole('button', { name: 'Tickets inchecken' }).click();
+  const messagesBeforeResend = await countMailMessages();
+  const [resendResponse] = await Promise.all([
+    page.waitForResponse((response) => response.url().includes(`/api/admin/orders/${reservation.orderNumber}/resend`)),
+    paidOrderRow.getByRole('button', { name: 'Betalingsmail opnieuw verzenden' }).click(),
+  ]);
+  expect(resendResponse.ok()).toBeTruthy();
+  await page.waitForLoadState('networkidle');
+  await expect.poll(countMailMessages).toBeGreaterThan(messagesBeforeResend);
+
+  const reloadedPaidOrderRow = page.locator('tr').filter({ hasText: reservation.orderNumber });
+  await reloadedPaidOrderRow.getByRole('button', { name: 'Tickets inchecken' }).click();
   const ticketModal = page.locator('#ticket-modal');
   const ticketCode = await ticketModal.locator('.ticket-modal-list li').first().locator('span').first().textContent();
   await Promise.all([
@@ -152,6 +166,14 @@ test('customer status page reflects paid status and ticket check-in state', asyn
   const refreshedTicketItems = page.locator('.ticket-list li');
   await expect(refreshedTicketItems.filter({ hasText: 'Ingecheckt' })).toHaveCount(1);
   await expect(refreshedTicketItems.filter({ hasText: 'Geldig' })).toHaveCount(1);
+  const reservationPageCheckin = page.getByRole('button', { name: 'Ticket inchecken' });
+  await expect(reservationPageCheckin).toHaveCount(1);
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes('/api/admin/tickets/') && response.url().endsWith('/use')),
+    reservationPageCheckin.click(),
+  ]);
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('.ticket-list li').filter({ hasText: 'Ingecheckt' })).toHaveCount(2);
 });
 
 test('admin can mark a reservation as paid and check in its ticket', async ({ page, request }) => {
