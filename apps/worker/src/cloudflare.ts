@@ -321,7 +321,7 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
                       <td align="right" style="padding:12px 14px;color:#101010;font-size:14px;font-weight:bold;">€${amountEuros}</td>
                     </tr>
                   </table>
-                  <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.6;"><strong style="color:#101010;">Volgende stap:</strong> betaal via de persoonlijke reserveringspagina.</p>
+                  <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.6;">De penningmeester gaat nu handmatig checken of de betaling ontvangen is, dit kan enkele dagen duren. Na confirmatie ontvang je een mail met de tickets. De huidige status van de reservering kun je zien op je reserveringspagina. Nog niet betaald? Dan kan dit ook via die link.</p>
                   <table role="presentation" cellspacing="0" cellpadding="0" border="0">
                     <tr>
                       <td align="center" style="background-color:#f5c900;border:1px solid #101010;">
@@ -332,7 +332,7 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
                 </td>
               </tr>
               <tr>
-                <td style="padding:16px 30px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;line-height:1.5;">Half Past Nine</td>
+                <td style="padding:16px 30px;border-top:1px solid #e5e7eb;color:#6b7280;font-size:12px;line-height:1.5;">Half Past Nine<br><span style="font-size:11px;">Dit is een automatisch gegenereerde mail.</span></td>
               </tr>
             </table>
           </td>
