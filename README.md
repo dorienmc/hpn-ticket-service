@@ -307,7 +307,7 @@ From there you can:
 
 ### 5. Re-check the private page after payment
 
-After marking an order paid from the admin page, refresh the reservation page or reopen the private link. The status should change to PAID. A payment confirmation email is sent with the concert date, time and venue, a link to the private reservation page, and a link for each ticket that opens that ticket on the reservation page. QR codes are not currently included.
+After marking an order paid from the admin page, refresh the reservation page or reopen the private link. The status should change to PAID. A payment confirmation email is sent with the concert date, time and venue, a link to the private reservation page, and a link for each ticket that opens that ticket on the reservation page. It also includes a PDF attachment with one QR code per ticket.
 
 When signed in as an admin, each valid ticket on the private reservation page has a **Ticket inchecken** button. It uses the same admin check-in endpoint as the admin overview. Customers who are not signed in as an admin only see ticket status.
 
