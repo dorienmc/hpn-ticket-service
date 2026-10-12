@@ -103,7 +103,7 @@ function createReservationDb(
           return { count: storedTicketCount } as T;
         }
         if (statement.includes('INSERT INTO orders')) {
-          const [orderNumber, accessToken, name, email, quantity, amountCents, createdAt, expiresAt] = args;
+          const [orderNumber, accessToken, name, email, quantity, amountCents, createdAt] = args;
           return {
             ...reservation,
             id: 99,
@@ -114,7 +114,7 @@ function createReservationDb(
             quantity,
             amount_cents: amountCents,
             created_at: createdAt,
-            expires_at: expiresAt,
+            expires_at: '',
           } as T;
         }
         if (statement.includes('SELECT * FROM orders WHERE order_number')) {
@@ -1205,7 +1205,7 @@ describe('Cloudflare Worker shell', () => {
   it('returns an expired reservation without requiring a payment link', async () => {
     const response = await app.request('/api/reservations/HP9-1234-ABCD/token123', {}, {
       FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
-      DB: createReservationDb({ ...reservation, quantity: 4 }),
+      DB: createReservationDb({ ...reservation, quantity: 4, status: 'EXPIRED' }),
     } as never);
 
     expect(response.status).toBe(200);
@@ -1214,5 +1214,17 @@ describe('Cloudflare Worker shell', () => {
       expired: true,
       paymentLink: null,
     }));
+  });
+
+  it('keeps reservations with past legacy expiry dates active', async () => {
+    const response = await app.request('/api/reservations/HP9-1234-ABCD/token123', {}, {
+      FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
+      ING_PAYMENT_LINK_2: 'https://example.com/pay',
+      DB: createReservationDb({ ...reservation, expires_at: '2000-01-01T00:00:00.000Z' }),
+    } as never);
+    expect(response.status).toBe(200);
+    const detail = await response.json();
+    expect(detail).toMatchObject({ status: 'RESERVED', expired: false });
+    expect(detail).not.toHaveProperty('expiresAt');
   });
 });

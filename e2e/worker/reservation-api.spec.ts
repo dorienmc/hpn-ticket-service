@@ -98,19 +98,33 @@ test('calculates capacity from active reservations (former capacity test)', asyn
   expect(after.available).toBe(before.available - 9);
 });
 
-test('expires stale reservations and releases their capacity (former expiry test)', async ({ request }) => {
+test('old reservations remain reserved and retain capacity until manually cancelled', async ({ request, page }) => {
   const before = await (await request.get(`${api}/api/capacity`)).json();
   const order = await reserve(request, 3);
-  executeSql(`UPDATE orders SET expires_at = '2000-01-01T00:00:00.000Z' WHERE order_number = '${order.orderNumber}'`);
+  executeSql(`UPDATE orders SET created_at = '2000-01-01T00:00:00.000Z', expires_at = '2000-01-02T00:00:00.000Z' WHERE order_number = '${order.orderNumber}'`);
   const detailUrl = order.paymentUrl.replace(origin, api).replace('/hpn-ticket-service/payment/', '/api/reservations/');
   const detail = await (await request.get(detailUrl)).json();
-  expect(detail.status).toBe('EXPIRED');
+  expect(detail.status).toBe('RESERVED');
+  expect(detail).not.toHaveProperty('expiresAt');
+  expect(order).not.toHaveProperty('expiresAt');
+  expect((await (await request.get(`${api}/api/capacity`)).json()).available).toBe(before.available - 3);
+  await login(request);
+  const listed = await (await request.get(`${api}/api/admin/orders`)).json();
+  expect(listed.orders.find((entry: { order_number: string }) => entry.order_number === order.orderNumber).status).toBe('RESERVED');
+  await request.get(`${api}/api/admin/summary`);
+  await page.goto(order.paymentUrl);
+  await expect(page.getByText('Gereserveerd', { exact: true })).toBeVisible();
+  await expect(page.getByText('Verloopt op', { exact: true })).toHaveCount(0);
+  await page.goto(`${api}/api/auth/google`);
+  await expect(page.getByRole('row').filter({ hasText: order.orderNumber })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Verleng 24 uur' })).toHaveCount(0);
+  expect((await mutate(request, order.orderNumber, 'cancel')).ok()).toBeTruthy();
   expect((await (await request.get(`${api}/api/capacity`)).json()).available).toBe(before.available);
 });
 
 test('deletes an expired order from the admin archive', async ({ request, page }) => {
   const order = await reserve(request, 1);
-  executeSql(`UPDATE orders SET expires_at = '2000-01-01T00:00:00.000Z' WHERE order_number = '${order.orderNumber}'`);
+  executeSql(`UPDATE orders SET status = 'EXPIRED' WHERE order_number = '${order.orderNumber}'`);
 
   await page.goto(`${api}/api/auth/google?email=${encodeURIComponent('dorienmc@gmail.com')}`);
   await expect(page).toHaveURL(/\/hpn-ticket-service\/admin$/);
@@ -159,14 +173,10 @@ test('cancels only reserved orders and releases capacity (former cancellation te
   expect((await mutate(request, order.orderNumber, 'cancel')).status()).toBe(400);
 });
 
-test('extends from current expiry and rejects missing orders (former extension test)', async ({ request }) => {
+test('reservation extension is no longer available', async ({ request }) => {
   const order = await reserve(request, 1);
   await login(request);
-  const extended = await mutate(request, order.orderNumber, 'extend', { hours: 24 });
-  const payload = await extended.json();
-  expect(payload.status).toBe('RESERVED');
-  expect(new Date(payload.expiresAt).getTime()).toBe(new Date(order.expiresAt).getTime() + 24 * 60 * 60 * 1000);
-  expect((await mutate(request, 'missing-order', 'extend', { hours: 24 })).status()).toBe(400);
+  expect((await mutate(request, order.orderNumber, 'extend', { hours: 24 })).status()).toBe(404);
 });
 
 test('persists admin audit records and atomically rolls back on audit failure (former SQLite tests)', async ({ request }) => {

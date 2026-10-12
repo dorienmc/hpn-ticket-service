@@ -32,7 +32,6 @@ type Bindings = {
   TOTAL_CAPACITY?: string;
   MAX_TICKETS_PER_RESERVATION?: string;
   TICKET_PRICE_CENTS?: string;
-  RESERVATION_TTL_HOURS?: string;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -223,9 +222,6 @@ function ticketCode(): string {
   return `HP9-TKT-${crypto.randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
 }
 
-function addHours(date: Date, hours: number): string {
-  return new Date(date.getTime() + hours * 60 * 60 * 1000).toISOString();
-}
 
 function sanitizeHeader(value: string): string {
   return value.replace(/[\r\n]+/g, ' ').trim();
@@ -249,17 +245,12 @@ function base64UrlEncode(value: string): string {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
-async function expireReservations(db: D1Database): Promise<void> {
-  await db.prepare(`UPDATE orders SET status = 'EXPIRED' WHERE status = 'RESERVED' AND expires_at <= ?`)
-    .bind(new Date().toISOString()).run();
-}
-
 async function availableCapacity(env: Bindings): Promise<number> {
   const result = await env.DB.prepare(`
     SELECT COALESCE(SUM(quantity), 0) AS active_quantity
     FROM orders
-    WHERE status = 'PAID' OR (status = 'RESERVED' AND expires_at > ?)
-  `).bind(new Date().toISOString()).first<{ active_quantity: number }>();
+    WHERE status IN ('PAID', 'RESERVED')
+  `).first<{ active_quantity: number }>();
   return numberFromEnv(env.TOTAL_CAPACITY, 100) - Number(result?.active_quantity ?? 0);
 }
 
@@ -564,7 +555,6 @@ app.post('/api/auth/logout', async (context) => {
 });
 
 app.get('/api/capacity', async (context) => {
-  await expireReservations(context.env.DB);
   return context.json({
     totalCapacity: numberFromEnv(context.env.TOTAL_CAPACITY, 100),
     available: await availableCapacity(context.env),
@@ -590,7 +580,6 @@ app.post('/api/reservations', async (context) => {
       return context.json({ error: 'reCAPTCHA validation failed' }, 400);
     }
 
-    await expireReservations(context.env.DB);
     if (quantity > await availableCapacity(context.env)) {
       return context.json({ error: 'Not enough tickets available' }, 400);
     }
@@ -604,12 +593,12 @@ app.post('/api/reservations', async (context) => {
       quantity,
       amountCents: quantity * numberFromEnv(context.env.TICKET_PRICE_CENTS, 1000),
       createdAt: now.toISOString(),
-      expiresAt: addHours(now, numberFromEnv(context.env.RESERVATION_TTL_HOURS, 336)),
     };
+    // Existing databases require expires_at; its legacy value no longer controls reservations.
     const reservation = await context.env.DB.prepare(`
       INSERT INTO orders (order_number, access_token, name, email, quantity, amount_cents, status, created_at, expires_at, paid_at, notes)
-      VALUES (?, ?, ?, ?, ?, ?, 'RESERVED', ?, ?, NULL, NULL) RETURNING *
-    `).bind(values.orderNumber, values.token, values.name, values.email, values.quantity, values.amountCents, values.createdAt, values.expiresAt)
+      VALUES (?, ?, ?, ?, ?, ?, 'RESERVED', ?, '', NULL, NULL) RETURNING *
+    `).bind(values.orderNumber, values.token, values.name, values.email, values.quantity, values.amountCents, values.createdAt)
       .first<ReservationRecord>();
     if (!reservation) throw new Error('Reservation could not be stored');
 
@@ -621,7 +610,6 @@ app.post('/api/reservations', async (context) => {
     return context.json({
       orderNumber: reservation.order_number,
       status: reservation.status,
-      expiresAt: reservation.expires_at,
       paymentUrl: frontendUrl(context.env, `payment/${reservation.order_number}/${reservation.access_token}`),
       available: await availableCapacity(context.env),
     }, 201);
@@ -631,7 +619,6 @@ app.post('/api/reservations', async (context) => {
 });
 
 app.get('/api/reservations/:orderNumber/:token', async (context) => {
-  await expireReservations(context.env.DB);
   const reservation = await context.env.DB.prepare('SELECT * FROM orders WHERE order_number = ? AND access_token = ?')
     .bind(context.req.param('orderNumber'), context.req.param('token')).first<ReservationRecord>();
   if (!reservation) return context.json({ error: 'Reservation not found' }, 404);
@@ -653,7 +640,6 @@ app.get('/api/reservations/:orderNumber/:token', async (context) => {
     amountCents: reservation.amount_cents,
     status: reservation.status,
     createdAt: reservation.created_at,
-    expiresAt: reservation.expires_at,
     paidAt: reservation.paid_at,
     expired: reservation.status === 'EXPIRED',
     paymentLink: paymentLink ?? null,
@@ -662,7 +648,6 @@ app.get('/api/reservations/:orderNumber/:token', async (context) => {
 });
 
 app.get('/api/admin/summary', async (context) => {
-  await expireReservations(context.env.DB);
   const rows = await context.env.DB.prepare('SELECT status, COALESCE(SUM(quantity), 0) AS quantity FROM orders GROUP BY status')
     .all<{ status: string; quantity: number }>();
   const summary: Record<string, number> = {
@@ -730,7 +715,6 @@ app.post('/api/admin/access', async (context) => {
 });
 
 app.get('/api/admin/orders', async (context) => {
-  await expireReservations(context.env.DB);
   const result = await context.env.DB.prepare('SELECT * FROM orders ORDER BY created_at DESC').all<ReservationRecord>();
   const orders = await Promise.all(result.results.map(async (order: ReservationRecord) => ({
     ...order,
@@ -806,18 +790,6 @@ app.delete('/api/admin/orders/:orderNumber', async (context) => {
   ]);
   if (!result.meta.changes) return context.json({ error: 'Only cancelled or expired orders can be removed' }, 400);
   return context.json({ orderNumber: value, deleted: true });
-});
-
-app.post('/api/admin/orders/:orderNumber/extend', async (context) => {
-  const { hours = 24 } = await context.req.json<{ hours?: number }>();
-  const reservation = await context.env.DB.prepare("SELECT * FROM orders WHERE order_number = ? AND status = 'RESERVED'")
-    .bind(context.req.param('orderNumber')).first<ReservationRecord>();
-  if (!reservation || !Number.isInteger(hours) || hours < 1 || new Date(reservation.expires_at) <= new Date()) {
-    return context.json({ error: 'Only active reserved orders can be extended with a positive whole number of hours' }, 400);
-  }
-  const expiresAt = addHours(new Date(reservation.expires_at), hours);
-  await context.env.DB.prepare('UPDATE orders SET expires_at = ? WHERE id = ?').bind(expiresAt, reservation.id).run();
-  return context.json({ orderNumber: reservation.order_number, status: reservation.status, expiresAt });
 });
 
 app.post('/api/admin/orders/:orderNumber/resend', async (context) => {

@@ -349,7 +349,6 @@ async function initApp() {
                       ${order.status === 'RESERVED'
                         ? `<div class="admin-actions">
                             <button class="admin-button" data-action="pay" data-order="${order.order_number}"><span aria-hidden="true">✅</span> Markeer als betaald</button>
-                            <button class="admin-button secondary" data-action="extend" data-order="${order.order_number}"><span aria-hidden="true">⏱️</span> Verleng 24 uur</button>
                             <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}"><span aria-hidden="true">✉️</span> Opnieuw sturen</button>
                             <button class="admin-button danger" data-action="cancel" data-order="${order.order_number}"><span aria-hidden="true">✕</span> Annuleer</button>
                           </div>`
@@ -469,8 +468,6 @@ async function initApp() {
               const response = await fetch(endpoint, {
                 method: action === 'remove' ? 'DELETE' : 'POST',
                 credentials: 'include',
-                headers: action === 'extend' ? { 'Content-Type': 'application/json' } : undefined,
-                body: action === 'extend' ? JSON.stringify({ hours: 24 }) : undefined,
               });
               const payload = await response.json();
               button.disabled = false;
@@ -532,10 +529,6 @@ async function initApp() {
         const session = await sessionResponse.json();
         const isAdmin = session.authenticated === true;
         const amount = (payload.amountCents / 100).toFixed(2);
-        const expiresAt = new Date(payload.expiresAt).toLocaleString('nl-NL', {
-          dateStyle: 'medium',
-          timeStyle: 'short',
-        });
         const paidAt = payload.paidAt
           ? new Date(payload.paidAt).toLocaleString('nl-NL', { dateStyle: 'medium', timeStyle: 'short' })
           : null;
@@ -600,7 +593,6 @@ async function initApp() {
               <div><dt>Tickets</dt><dd>${payload.quantity}</dd></div>
               <div><dt>Bedrag</dt><dd>€${amount}</dd></div>
               ${paidAt ? `<div><dt>Betaald op</dt><dd>${escapeHtml(paidAt)}</dd></div>` : ''}
-              <div><dt>Verloopt op</dt><dd>${expiresAt}</dd></div>
           </dl>
           ${paymentSection}
           ${ticketSection}

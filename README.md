@@ -31,6 +31,16 @@ This project is configured for Node 24 via the repository's `.nvmrc` file and th
 
 ## Ticket PDFs and check-in
 
+Reservations do not expire automatically. They remain reserved and count toward
+capacity until an admin cancels them or marks them paid; paid orders also count
+toward capacity. There is no reservation expiry date or extension action.
+Previously expired orders remain in the archive and are not automatically
+restored. Admin login sessions still expire normally.
+
+The legacy `orders.expires_at` database column is retained for compatibility
+with existing databases, but is never used to determine status or capacity.
+New orders store an empty value in this column. No database migration is needed.
+
 Paid-ticket emails include one PDF with a page and QR code per ticket. The same
 PDF is regenerated from the existing ticket codes when an admin resends the
 ticket email. Reservation emails do not include a PDF. PDFs are generated in
@@ -108,7 +118,7 @@ Coverage formerly attached to Express is now exercised against the Worker:
 | Former tests | Worker coverage |
 | --- | --- |
 | Reservation creation, identifiers, quantity limits, amount, capacity | `e2e/worker/reservation-api.spec.ts` and `src/cloudflare.test.ts` |
-| Expiry, cancellation, extension, missing-order handling | `e2e/worker/reservation-api.spec.ts` |
+| Non-expiring reservations, capacity retention, cancellation, legacy expired orders, missing-order handling | `e2e/worker/reservation-api.spec.ts` |
 | Order listing, idempotent payment, unique tickets, single check-in, summary quantities | `e2e/worker/reservation-api.spec.ts` |
 | Owner permissions, normalized persisted access, audit, rollback on audit failure | `src/cloudflare.test.ts`, `e2e/worker/admin-access.spec.ts`, `e2e/worker/reservation-api.spec.ts` |
 | Revocation, invalid input/JSON, non-owner/forged sessions, origin checks, disabled mocks, empty initial allowlist | `src/cloudflare.test.ts` and `e2e/worker/admin-access.spec.ts` |
@@ -122,7 +132,6 @@ Local backend defaults come from the `vars` block in `apps/worker/wrangler.local
 | `TOTAL_CAPACITY` | `100` | Maximum number of tickets |
 | `MAX_TICKETS_PER_RESERVATION` | `5` | Maximum tickets in one reservation |
 | `TICKET_PRICE_CENTS` | `1000` | Price per ticket in cents |
-| `RESERVATION_TTL_HOURS` | `336` | Reservation lifetime before expiry (two weeks) |
 | `ING_PAYMENT_LINK_1` | Demo URL | ING payment link for a 1-ticket reservation |
 | `ING_PAYMENT_LINK_2` | Demo URL | ING payment link for a 2-ticket reservation |
 | `ING_PAYMENT_LINK_3` | Demo URL | ING payment link for a 3-ticket reservation |
@@ -275,7 +284,6 @@ Click the link in the email or open the route manually. This page shows:
 - customer name and email
 - ticket quantity
 - amount due
-- expiry time
 - current status
 - ING payment link when the reservation is still active
 
