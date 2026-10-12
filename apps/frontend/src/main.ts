@@ -456,7 +456,7 @@ async function initApp() {
               const confirmation = action === 'cancel'
                 ? `Order ${orderNumber} annuleren?${order?.status === 'PAID' ? ' Dit stort geen betaling terug; de ticketcodes worden ongeldig gemaakt en de capaciteit komt weer beschikbaar.' : ' De capaciteit komt weer beschikbaar.'}`
                 : action === 'remove'
-                  ? `Geannuleerde order ${orderNumber} definitief verwijderen? Dit kan niet ongedaan worden gemaakt.`
+                  ? `${order?.status === 'EXPIRED' ? 'Verlopen' : 'Geannuleerde'} order ${orderNumber} definitief verwijderen? Dit kan niet ongedaan worden gemaakt.`
                   : undefined;
 
               if (confirmation && !window.confirm(confirmation)) {
