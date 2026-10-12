@@ -661,7 +661,12 @@ async function initApp() {
             ticket.removeAttribute('aria-current');
           });
           if (!window.location.hash.startsWith('#ticket-')) return;
-          const ticketCode = decodeURIComponent(window.location.hash.slice('#ticket-'.length));
+          let ticketCode: string;
+          try {
+            ticketCode = decodeURIComponent(window.location.hash.slice('#ticket-'.length));
+          } catch {
+            return;
+          }
           const ticket = container?.querySelector(`#ticket-${CSS.escape(ticketCode)}`);
           ticket?.classList.add('selected-ticket');
           ticket?.setAttribute('aria-current', 'true');
