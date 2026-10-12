@@ -35,7 +35,12 @@ Reservations do not expire automatically. They remain reserved and count toward
 capacity until an admin cancels them or marks them paid; paid orders also count
 toward capacity. There is no reservation expiry date or extension action.
 Previously expired orders remain in the archive and are not automatically
-restored. Admin login sessions still expire normally.
+restored. Admins can restore cancelled or expired orders to reserved or paid
+from the archive, provided sufficient capacity is available. Restoring to
+reserved sends no email and clears the payment timestamp; restoring to paid
+issues fresh tickets and sends the ticket email with PDF. Old ticket codes
+remain invalid. If mail delivery fails, the restored order stays paid and the
+admin can retry using the resend button. Admin login sessions still expire normally.
 
 The legacy `orders.expires_at` database column is retained for compatibility
 with existing databases, but is never used to determine status or capacity.

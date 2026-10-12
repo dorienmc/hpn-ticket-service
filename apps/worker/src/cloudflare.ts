@@ -729,6 +729,9 @@ app.post('/api/admin/orders/:orderNumber/pay', async (context) => {
   const reservation = await context.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?')
     .bind(value).first<ReservationRecord>();
   if (!reservation) return context.json({ error: 'Order not found' }, 404);
+  if (reservation.status !== 'RESERVED' && reservation.status !== 'PAID') {
+    return context.json({ error: 'Archived orders must be restored before marking them paid' }, 400);
+  }
 
   const now = new Date().toISOString();
   const statements: D1PreparedStatement[] = [
@@ -751,6 +754,53 @@ app.post('/api/admin/orders/:orderNumber/pay', async (context) => {
     }
   }
   return context.json({ orderNumber: value, status: 'PAID', paidAt: now });
+});
+
+app.post('/api/admin/orders/:orderNumber/restore', async (context) => {
+  const body = await context.req.json<{ status?: string }>();
+  if (body.status !== 'RESERVED' && body.status !== 'PAID') {
+    return context.json({ error: 'Restore status must be RESERVED or PAID' }, 400);
+  }
+  const value = context.req.param('orderNumber');
+  const reservation = await context.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?')
+    .bind(value).first<ReservationRecord>();
+  if (!reservation) return context.json({ error: 'Order not found' }, 404);
+  if (reservation.status !== 'CANCELLED' && reservation.status !== 'EXPIRED') {
+    return context.json({ error: 'Only cancelled or expired orders can be restored' }, 400);
+  }
+  const now = new Date().toISOString();
+  const paidAt = body.status === 'PAID' ? now : null;
+  const capacity = numberFromEnv(context.env.TOTAL_CAPACITY, 100);
+  // Each statement checks the same eligibility inside one atomic D1 batch.
+  const eligible = `status IN ('CANCELLED', 'EXPIRED')
+    AND quantity <= ? - (SELECT COALESCE(SUM(quantity), 0) FROM orders WHERE status IN ('RESERVED', 'PAID'))`;
+  const statements: D1PreparedStatement[] = [
+    context.env.DB.prepare(`DELETE FROM tickets WHERE order_id = ?
+      AND EXISTS (SELECT 1 FROM orders WHERE order_number = ? AND ${eligible})`)
+      .bind(reservation.id, value, capacity),
+  ];
+  if (body.status === 'PAID') {
+    for (let index = 0; index < reservation.quantity; index += 1) {
+      statements.push(context.env.DB.prepare(`INSERT INTO tickets (order_id, ticket_code, status, created_at, used_at)
+        SELECT id, ?, 'VALID', ?, NULL FROM orders WHERE order_number = ? AND ${eligible}`)
+        .bind(ticketCode(), now, value, capacity));
+    }
+  }
+  statements.push(context.env.DB.prepare(`UPDATE orders SET status = ?, paid_at = ?, expires_at = ''
+    WHERE order_number = ? AND ${eligible}`).bind(body.status, paidAt, value, capacity));
+  const results = await context.env.DB.batch(statements);
+  if (!Number(results[results.length - 1].meta.changes)) {
+    return context.json({ error: 'Order could not be restored: insufficient capacity or its status changed' }, 409);
+  }
+  if (body.status === 'PAID') {
+    try {
+      await sendReservationEmail(context.env, { ...reservation, status: 'PAID', paid_at: paidAt });
+    } catch (error) {
+      console.error('Restored order ticket email delivery failed', error);
+      return context.json({ error: 'Order restored as paid, but ticket email delivery failed. Use resend to retry.' }, 502);
+    }
+  }
+  return context.json({ orderNumber: value, status: body.status, paidAt });
 });
 
 app.post('/api/admin/orders/:orderNumber/cancel', async (context) => {

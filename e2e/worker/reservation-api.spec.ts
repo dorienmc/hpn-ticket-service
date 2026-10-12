@@ -179,6 +179,67 @@ test('reservation extension is no longer available', async ({ request }) => {
   expect((await mutate(request, order.orderNumber, 'extend', { hours: 24 })).status()).toBe(404);
 });
 
+for (const archivedStatus of ['CANCELLED', 'EXPIRED']) {
+  test(`restores ${archivedStatus} orders without reserved mail and with fresh paid tickets`, async ({ request, page }) => {
+    const order = await reserve(request, 2);
+    await login(request);
+    expect((await mutate(request, order.orderNumber, 'pay')).ok()).toBeTruthy();
+    const detailUrl = order.paymentUrl.replace(origin, api).replace('/hpn-ticket-service/payment/', '/api/reservations/');
+    const oldTickets = (await (await request.get(detailUrl)).json()).tickets;
+    expect((await mutate(request, order.orderNumber, 'cancel')).ok()).toBeTruthy();
+    if (archivedStatus === 'EXPIRED') {
+      executeSql(`UPDATE orders SET status = 'EXPIRED' WHERE order_number = '${order.orderNumber}'`);
+    }
+    const mailUrl = `${process.env.E2E_MAILPIT_URL}/api/v1/search?query=${encodeURIComponent(`to:${order.detail.email}`)}`;
+    const mailCount = async () => (await (await request.get(mailUrl)).json()).messages_count;
+    const beforeMail = await mailCount();
+    const beforeCapacity = (await (await request.get(`${api}/api/capacity`)).json()).available;
+    await page.goto(`${api}/api/auth/google`);
+    await page.getByRole('link', { name: 'Verlopen / geannuleerd' }).click();
+    const row = page.getByRole('row').filter({ hasText: order.orderNumber });
+    await row.getByRole('button', { name: 'Terug naar gereserveerd' }).click();
+    await expect(row).toHaveCount(0);
+    const reserved = await (await request.get(detailUrl)).json();
+    expect(reserved).toMatchObject({ status: 'RESERVED', paidAt: null, tickets: [] });
+    expect(await mailCount()).toBe(beforeMail);
+    expect((await (await request.get(`${api}/api/capacity`)).json()).available).toBe(beforeCapacity - 2);
+    expect((await mutate(request, order.orderNumber, 'restore', { status: 'PAID' })).status()).toBe(400);
+    expect((await mutate(request, order.orderNumber, 'cancel')).ok()).toBeTruthy();
+    if (archivedStatus === 'EXPIRED') {
+      executeSql(`UPDATE orders SET status = 'EXPIRED' WHERE order_number = '${order.orderNumber}'`);
+    }
+    await page.reload();
+    await expect(row).toBeVisible();
+    page.once('dialog', (dialog) => dialog.accept());
+    await row.getByRole('button', { name: 'Herstel als betaald' }).click();
+    await expect(row).toHaveCount(0);
+    const paid = await (await request.get(detailUrl)).json();
+    expect(paid.status).toBe('PAID');
+    expect(paid.tickets).toHaveLength(2);
+    expect(paid.tickets.every((ticket: { ticket_code: string }) =>
+      !oldTickets.some((old: { ticket_code: string }) => old.ticket_code === ticket.ticket_code))).toBe(true);
+    expect(await mailCount()).toBe(beforeMail + 1);
+    const mail = (await (await request.get(mailUrl)).json()).messages.at(-1);
+    expect(mail.Subject).toContain('Je tickets');
+    expect(mail.Attachments).toHaveLength(1);
+  });
+}
+
+test('restoring archived orders enforces capacity and blocks direct pay bypass', async ({ request }) => {
+  const order = await reserve(request, 1);
+  await login(request);
+  expect((await mutate(request, order.orderNumber, 'cancel')).ok()).toBeTruthy();
+  executeSql(`UPDATE orders SET quantity = 101 WHERE order_number = '${order.orderNumber}'`);
+  for (const status of ['RESERVED', 'PAID']) {
+    expect((await mutate(request, order.orderNumber, 'restore', { status })).status()).toBe(409);
+  }
+  expect((await mutate(request, order.orderNumber, 'pay')).status()).toBe(400);
+  expect((await mutate(request, order.orderNumber, 'restore', { status: 'INVALID' })).status()).toBe(400);
+  expect((await mutate(request, 'missing-order', 'restore', { status: 'RESERVED' })).status()).toBe(404);
+  const detailUrl = order.paymentUrl.replace(origin, api).replace('/hpn-ticket-service/payment/', '/api/reservations/');
+  expect(await (await request.get(detailUrl)).json()).toMatchObject({ status: 'CANCELLED', tickets: [] });
+});
+
 test('persists admin audit records and atomically rolls back on audit failure (former SQLite tests)', async ({ request }) => {
   await login(request);
   const initial = await (await request.get(`${api}/api/admin/access`)).json();
