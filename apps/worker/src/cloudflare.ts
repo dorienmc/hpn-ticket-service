@@ -734,26 +734,31 @@ app.post('/api/admin/orders/:orderNumber/pay', async (context) => {
   }
 
   const now = new Date().toISOString();
-  const statements: D1PreparedStatement[] = [
-    context.env.DB.prepare("UPDATE orders SET status = 'PAID', paid_at = ? WHERE order_number = ? AND status != 'PAID'").bind(now, value),
-  ];
-  const existing = await context.env.DB.prepare('SELECT COUNT(*) AS count FROM tickets WHERE order_id = ?')
-    .bind(reservation.id).first<{ count: number }>();
-  if (Number(existing?.count ?? 0) === 0) {
-    for (let index = 0; index < reservation.quantity; index += 1) {
-      statements.push(context.env.DB.prepare(`INSERT INTO tickets (order_id, ticket_code, status, created_at, used_at) VALUES (?, ?, 'VALID', ?, NULL)`)
-        .bind(reservation.id, ticketCode(), now));
-    }
+  const codes = Array.from({ length: reservation.quantity }, () => ticketCode());
+  // One conditional insert issues the entire set; concurrent batches cannot both see an empty set.
+  const [, transition] = await context.env.DB.batch([
+    context.env.DB.prepare(`INSERT INTO tickets (order_id, ticket_code, status, created_at, used_at)
+      SELECT orders.id, codes.ticket_code, 'VALID', ?, NULL
+      FROM orders CROSS JOIN (${codes.map(() => 'SELECT ? AS ticket_code').join(' UNION ALL ')}) AS codes
+      WHERE orders.order_number = ? AND orders.status IN ('RESERVED', 'PAID')
+        AND NOT EXISTS (SELECT 1 FROM tickets WHERE tickets.order_id = orders.id)`)
+      .bind(now, ...codes, value),
+    context.env.DB.prepare("UPDATE orders SET status = 'PAID', paid_at = ? WHERE order_number = ? AND status = 'RESERVED'")
+      .bind(now, value),
+  ]);
+  const paidReservation = await context.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?')
+    .bind(value).first<ReservationRecord>();
+  if (paidReservation?.status !== 'PAID') {
+    return context.json({ error: 'Order could not be marked paid: its status changed' }, 409);
   }
-  const results = await context.env.DB.batch(statements);
-  if (Number(results[0]?.meta.changes ?? 0) > 0) {
+  if (Number(transition.meta.changes) > 0) {
     try {
-      await sendReservationEmail(context.env, { ...reservation, status: 'PAID', paid_at: now });
+      await sendReservationEmail(context.env, paidReservation);
     } catch (error) {
       console.error('Payment confirmation email delivery failed', error);
     }
   }
-  return context.json({ orderNumber: value, status: 'PAID', paidAt: now });
+  return context.json({ orderNumber: value, status: 'PAID', paidAt: paidReservation.paid_at });
 });
 
 app.post('/api/admin/orders/:orderNumber/restore', async (context) => {

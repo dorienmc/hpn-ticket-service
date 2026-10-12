@@ -84,6 +84,12 @@ function createReservationDb(
           return { meta: { changes: 1 } };
         }
         if (statement.includes('INSERT INTO tickets')) {
+          if (statement.includes('AS codes')) {
+            if ((storedReservation.status !== 'RESERVED' && storedReservation.status !== 'PAID')
+              || storedTicketCount !== 0) return { meta: { changes: 0 } };
+            storedTicketCount = args.length - 2;
+            return { meta: { changes: storedTicketCount } };
+          }
           storedTicketCount += 1;
           return { meta: { changes: 1 } };
         }

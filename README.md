@@ -51,6 +51,11 @@ PDF is regenerated from the existing ticket codes when an admin resends the
 ticket email. Reservation emails do not include a PDF. PDFs are generated in
 memory and are not stored separately.
 
+Payment confirmation issues the full ticket set with one conditional SQL insert
+in the same atomic D1 batch as the paid-state transition. Concurrent or repeated
+confirmations reuse the existing tickets and payment timestamp; only the request
+that transitions the order from reserved to paid sends the confirmation email.
+
 Each QR code opens the personal reservation page at the corresponding ticket,
 just like the ticket links in the email. The linked ticket is highlighted with
 a yellow background and a green outline. Opening the link does not check in a
