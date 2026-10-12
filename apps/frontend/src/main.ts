@@ -573,6 +573,7 @@ async function initApp() {
           ? `
             <div class="payment-box success-box">
               <h2>Je tickets</h2>
+              ${isAdmin ? `<button class="admin-button" data-checkin-all ${payload.tickets.every((ticket: { status: string }) => ticket.status === 'USED') ? 'disabled' : ''}><span aria-hidden="true">✅</span> Alles inchecken</button>` : ''}
               <ul class="ticket-list">
                 ${payload.tickets.map((ticket: { ticket_code: string; status: string }) => `
                   <li id="ticket-${escapeHtml(ticket.ticket_code)}">
@@ -625,10 +626,49 @@ async function initApp() {
           });
         });
 
-        if (window.location.hash.startsWith('#ticket-')) {
+        container.querySelector<HTMLButtonElement>('[data-checkin-all]')?.addEventListener('click', async () => {
+          const buttons = container.querySelectorAll<HTMLButtonElement>('[data-checkin-all], [data-checkin-ticket]');
+          buttons.forEach((button) => { button.disabled = true; });
+          const checkinStatus = container.querySelector<HTMLParagraphElement>('#ticket-checkin-status');
+          if (checkinStatus) {
+            checkinStatus.textContent = 'Tickets worden ingecheckt...';
+            checkinStatus.classList.remove('error-message');
+          }
+          try {
+            for (const ticket of payload.tickets) {
+              if (ticket.status === 'USED') continue;
+              await checkInTicket(ticket.ticket_code);
+              ticket.status = 'USED';
+              const item = container.querySelector(`#ticket-${CSS.escape(ticket.ticket_code)}`);
+              const status = item?.querySelector('span > span');
+              if (status) status.textContent = statusLabel('USED');
+              item?.querySelector('[data-checkin-ticket]')?.remove();
+            }
+            window.location.reload();
+          } catch (error) {
+            container.querySelectorAll<HTMLButtonElement>('[data-checkin-all], [data-checkin-ticket]')
+              .forEach((button) => { button.disabled = false; });
+            if (checkinStatus) {
+              checkinStatus.textContent = error instanceof Error ? error.message : 'Niet alle tickets konden worden ingecheckt.';
+              checkinStatus.classList.add('error-message');
+            }
+          }
+        });
+
+        function selectLinkedTicket() {
+          container?.querySelectorAll('.selected-ticket').forEach((ticket) => {
+            ticket.classList.remove('selected-ticket');
+            ticket.removeAttribute('aria-current');
+          });
+          if (!window.location.hash.startsWith('#ticket-')) return;
           const ticketCode = decodeURIComponent(window.location.hash.slice('#ticket-'.length));
-          container.querySelector(`#ticket-${CSS.escape(ticketCode)}`)?.scrollIntoView({ block: 'center' });
+          const ticket = container?.querySelector(`#ticket-${CSS.escape(ticketCode)}`);
+          ticket?.classList.add('selected-ticket');
+          ticket?.setAttribute('aria-current', 'true');
+          ticket?.scrollIntoView({ block: 'center' });
         }
+        selectLinkedTicket();
+        window.addEventListener('hashchange', selectLinkedTicket);
       } catch (error) {
         container.innerHTML = `
           <p class="error-message">${error instanceof Error ? error.message : 'Deze reservering kon niet worden gevonden.'}</p>

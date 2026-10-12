@@ -441,6 +441,13 @@ select {
   border-bottom: 1px solid #bbf7d0;
 }
 
+.ticket-list li.selected-ticket {
+  background-color: #fef9c3;
+  outline: 2px solid #087b76;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
 .error-message {
   color: #b91c1c;
   font-weight: 600;

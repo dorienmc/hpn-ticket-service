@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { app, base64UrlEncode, sendReservationEmail, verifyGoogleIdToken, verifyRecaptcha } from './cloudflare.js';
 import type { ReservationRecord } from './types.js';
+import { PDFDocument } from 'pdf-lib';
 
 const env = {
   FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
@@ -882,6 +883,39 @@ describe('Cloudflare Worker shell', () => {
     expect(email.HTML).toContain('Bekijk dit ticket');
     expect(email.HTML).not.toContain('De penningmeester gaat nu handmatig checken');
     expect(email.HTML).not.toContain('Nog niet betaald?');
+    expect(email.Attachments).toHaveLength(1);
+    expect(email.Attachments[0].ContentType).toBe('application/pdf');
+    expect((await PDFDocument.load(Buffer.from(email.Attachments[0].Content, 'base64'))).getPageCount()).toBe(2);
+  });
+
+  it.each(['gmail', 'resend'])('attaches ticket PDFs when sending paid emails through %s', async (delivery) => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    if (delivery === 'gmail') {
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'test-access-token' })));
+    }
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 202 }));
+    await sendReservationEmail({
+      FRONTEND_URL: 'https://example.github.io/hpn-ticket-service',
+      EMAIL_DELIVERY: delivery,
+      GOOGLE_SENDER_EMAIL: 'sender@example.com',
+      RESEND_FROM_EMAIL: 'sender@example.com',
+      DB: createReservationDb({ ...reservation, status: 'PAID' }),
+    } as never, { ...reservation, status: 'PAID' });
+
+    const payload = JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body));
+    let content: string;
+    if (delivery === 'gmail') {
+      const mime = Buffer.from(payload.raw, 'base64url').toString();
+      expect(mime).toContain('Content-Type: multipart/mixed;');
+      expect(mime).toContain('Content-Disposition: attachment; filename="tickets-HP9-1234-ABCD.pdf"');
+      const pdfPart = mime.split('Content-Type: application/pdf')[1];
+      content = pdfPart.split('\r\n\r\n')[1].split('\r\n--')[0].replace(/\r\n/g, '');
+    } else {
+      expect(payload.attachments).toHaveLength(1);
+      expect(payload.attachments[0].filename).toBe('tickets-HP9-1234-ABCD.pdf');
+      content = payload.attachments[0].content;
+    }
+    expect((await PDFDocument.load(Buffer.from(content, 'base64'))).getPageCount()).toBe(2);
   });
 
   it('requires a reCAPTCHA secret outside local development', async () => {
@@ -1082,6 +1116,7 @@ describe('Cloudflare Worker shell', () => {
     expect(payload.HTML).toContain('href="https://example.github.io/hpn-ticket-service/payment/');
     expect(payload.HTML).toContain('&lt;img src=x onerror=alert(1)&gt;');
     expect(payload.HTML).not.toContain('<img src=x onerror=alert(1)>');
+    expect(payload.Attachments).toBeUndefined();
   });
 
   it('keeps a created reservation when email delivery fails', async () => {

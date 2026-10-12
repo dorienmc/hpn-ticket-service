@@ -24,10 +24,25 @@ This project is configured for Node 24 via the repository's `.nvmrc` file and th
 - [x] Use HP9 styling in emails
 - [x] Get things working in production
 - [x] CI/CD pipeline (GitHub Actions: worker tests/build, frontend build, e2e)
-- [ ] Ticket QR code support
+- [x] Ticket QR code support (PDF attachment in paid-ticket emails)
 - [x] Ticket check-in support (admin UI and private reservation page)
 - [x] Use the same Worker backend for local development, testing and production
 - [ ] Split up main.ts into several pages
+
+## Ticket PDFs and check-in
+
+Paid-ticket emails include one PDF with a page and QR code per ticket. The same
+PDF is regenerated from the existing ticket codes when an admin resends the
+ticket email. Reservation emails do not include a PDF. PDFs are generated in
+memory and are not stored separately.
+
+Each QR code opens the personal reservation page at the corresponding ticket,
+just like the ticket links in the email. The linked ticket is highlighted with
+a yellow background and a green outline. Opening the link does not check in a
+ticket. Keep the PDF private: anyone with the QR link can view the reservation.
+Only authenticated admins can check in individual tickets or use **Alles
+inchecken** on the reservation page. Bulk check-in skips used tickets and stops
+with a visible error if a request fails; successful check-ins remain saved.
 
 ## Local development with Docker Compose
 
@@ -36,6 +51,13 @@ From the project root, start all services:
 ```bash
 docker compose up --build
 ```
+
+The frontend and backend run `npm ci` at startup to keep their mounted
+`node_modules` volumes in sync with the lockfiles, including after adding
+dependencies. This adds installation time to startup but avoids stale packages
+after rebuilding. The `wrangler-data` volume is preserved; do not use
+`docker compose down -v` to fix dependency errors, as that also removes local D1
+data.
 
 This starts:
 
@@ -74,6 +96,12 @@ npm run test:e2e:worker
 ```
 
 The isolated suite runs all existing browser scenarios plus admin access and migrated reservation API tests against Wrangler and real local D1. It uses ports 8789 (API), 5180 (frontend) and 8030 (test mail capture), creates temporary D1 state, and cleans it up afterwards. It does not touch your normal local database or call Google. Install the root, Worker and frontend dependencies and Playwright Chromium before running it. CI also runs the Docker-based E2E suite with Mailpit.
+
+Ticket tests cover decoding the QR codes drawn in the PDF, one PDF page per
+ticket, attachments for Gmail/Mailpit/Resend, and no attachment for reservation
+emails. E2E tests verify payment and resend attachments, ticket-anchor navigation,
+admin-only bulk check-in, and retry after a partial check-in failure without
+checking in successful tickets twice.
 
 Coverage formerly attached to Express is now exercised against the Worker:
 

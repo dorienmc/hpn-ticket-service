@@ -47,6 +47,38 @@ test('creates valid reservations with secure identifiers, correct quantity and a
   expect(order.detail.quantity).toBe(2);
 });
 
+test('reservation emails omit PDFs while payment and resend emails attach PDFs for the same tickets', async ({ request }) => {
+  const order = await reserve(request, 2);
+  const mailUrl = `${process.env.E2E_MAILPIT_URL}/api/v1/search?query=${encodeURIComponent(`to:${order.detail.email}`)}`;
+  const readMail = async () => {
+    const response = await request.get(mailUrl);
+    expect(response.ok()).toBeTruthy();
+    return (await response.json()).messages;
+  };
+  const reservationMail = await readMail();
+  expect(reservationMail).toHaveLength(1);
+  expect(reservationMail[0].Attachments).toBeUndefined();
+  await login(request);
+  expect((await mutate(request, order.orderNumber, 'pay')).ok()).toBeTruthy();
+  const paidMail = await readMail();
+  expect(paidMail).toHaveLength(2);
+  expect((await mutate(request, order.orderNumber, 'resend')).ok()).toBeTruthy();
+  const resentMail = await readMail();
+  expect(resentMail).toHaveLength(3);
+  const details = await request.get(order.paymentUrl.replace(origin, api).replace('/hpn-ticket-service/payment/', '/api/reservations/'));
+  const tickets = (await details.json()).tickets;
+  for (const mail of [paidMail[1], resentMail[2]]) {
+    expect(mail.Subject).toContain('Je tickets');
+    expect(mail.Attachments).toHaveLength(1);
+    expect(mail.Attachments[0].Filename).toBe(`tickets-${order.orderNumber}.pdf`);
+    expect(mail.Attachments[0].ContentType).toBe('application/pdf');
+    expect(Buffer.from(mail.Attachments[0].Content, 'base64').subarray(0, 5).toString()).toBe('%PDF-');
+    for (const ticket of tickets) {
+      expect(mail.HTML).toContain(`${order.paymentUrl}#ticket-${encodeURIComponent(ticket.ticket_code)}`);
+    }
+  }
+});
+
 test('rejects invalid quantities and accepts the supported maximum (former quantity tests)', async ({ request }) => {
   for (const quantity of [0, 6, 2.5]) {
     const response = await request.post(`${api}/api/reservations`, {

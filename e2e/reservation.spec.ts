@@ -178,6 +178,72 @@ test('customer status page reflects paid status and ticket check-in state', asyn
   await expect(page.locator('.ticket-list li').filter({ hasText: 'Ingecheckt' })).toHaveCount(2);
 });
 
+test('reservation QR links select a ticket and only admins can bulk check in with retry after failure', async ({ page, request }) => {
+  const api = process.env.E2E_API_URL || 'http://localhost:8787';
+  const created = await request.post(`${api}/api/reservations`, {
+    data: { name: 'QR and bulk check-in customer', email: uniqueEmail(), quantity: 3 },
+  });
+  expect(created.ok()).toBeTruthy();
+  const reservation = await created.json();
+  await loginAsMockGoogleAdmin(page);
+  const paid = await page.request.post(`${api}/api/admin/orders/${reservation.orderNumber}/pay`, {
+    headers: { Origin: new URL(reservation.paymentUrl).origin },
+  });
+  expect(paid.ok()).toBeTruthy();
+  await page.goto(reservation.paymentUrl);
+  await expect(page.locator('.ticket-list li')).toHaveCount(3);
+  const codes = await page.locator('.ticket-list li strong').allTextContents();
+  const qrUrl = `${reservation.paymentUrl}#ticket-${encodeURIComponent(codes[1])}`;
+
+  await page.goto(qrUrl);
+  await expect(page.locator(`#ticket-${codes[1]}`)).toBeInViewport();
+  await expect(page.locator('.ticket-list li.selected-ticket')).toHaveCount(1);
+  await expect(page.locator(`#ticket-${codes[1]}`)).toHaveCSS('background-color', 'rgb(254, 249, 195)');
+  await expect(page.locator(`#ticket-${codes[1]}`)).toHaveCSS('outline-style', 'solid');
+  await page.evaluate((code) => { window.location.hash = `ticket-${encodeURIComponent(code)}`; }, codes[2]);
+  await expect(page.locator('.ticket-list li.selected-ticket')).toHaveAttribute('id', `ticket-${codes[2]}`);
+  await expect(page.locator(`#ticket-${codes[1]}`)).not.toHaveCSS('background-color', 'rgb(254, 249, 195)');
+  await page.evaluate(() => { window.location.hash = ''; });
+  await expect(page.locator('.ticket-list li.selected-ticket')).toHaveCount(0);
+  const guestContext = await page.context().browser()!.newContext();
+  const guestPage = await guestContext.newPage();
+  await guestPage.goto(qrUrl);
+  await expect(guestPage.locator('.ticket-list li')).toHaveCount(3);
+  await expect(guestPage.locator(`#ticket-${codes[1]}`)).toBeInViewport();
+  await expect(guestPage.locator(`#ticket-${codes[1]}`)).toHaveCSS('background-color', 'rgb(254, 249, 195)');
+  await expect(guestPage.getByRole('button', { name: 'Alles inchecken' })).toHaveCount(0);
+  await expect(guestPage.getByRole('button', { name: 'Ticket inchecken', exact: true })).toHaveCount(0);
+  const forbidden = await guestContext.request.post(`${api}/api/admin/tickets/${codes[0]}/use`, {
+    headers: { Origin: new URL(reservation.paymentUrl).origin },
+  });
+  expect(forbidden.status()).toBe(401);
+  await guestContext.close();
+
+  await loginAsMockGoogleAdmin(page);
+  await page.goto(qrUrl);
+  await expect(page.getByRole('button', { name: 'Alles inchecken' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Ticket inchecken', exact: true })).toHaveCount(3);
+  await expect(page.locator(`#ticket-${codes[1]}`)).toContainText('Geldig');
+  const failedUrl = `${api}/api/admin/tickets/${codes[1]}/use`;
+  await page.route(failedUrl, (route) => route.fulfill({
+    status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Test check-in failure' }),
+  }));
+  await page.getByRole('button', { name: 'Alles inchecken' }).click();
+  await expect(page.locator('#ticket-checkin-status')).toContainText('Test check-in failure');
+  await expect(page.locator(`#ticket-${codes[0]}`)).toContainText('Ingecheckt');
+  await expect(page.getByRole('button', { name: 'Ticket inchecken', exact: true })).toHaveCount(2);
+
+  await page.unroute(failedUrl);
+  const firstTicketRequests: string[] = [];
+  page.on('request', (request) => {
+    if (request.url() === `${api}/api/admin/tickets/${codes[0]}/use`) firstTicketRequests.push(request.url());
+  });
+  await page.getByRole('button', { name: 'Alles inchecken' }).click();
+  await expect(page.locator('.ticket-list li').filter({ hasText: 'Ingecheckt' })).toHaveCount(3);
+  await expect(page.getByRole('button', { name: 'Alles inchecken' })).toBeDisabled();
+  expect(firstTicketRequests).toHaveLength(0);
+});
+
 test('admin can mark a reservation as paid and check in its ticket', async ({ page, request }) => {
   const response = await request.post(`${process.env.E2E_API_URL || 'http://localhost:8787'}/api/reservations`, {
     data: {

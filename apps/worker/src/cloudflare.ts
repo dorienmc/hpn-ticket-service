@@ -5,6 +5,7 @@ import { createMiddleware } from 'hono/factory';
 import type { ReservationRecord, TicketRecord } from './types.js';
 import { MAX_SUPPORTED_TICKET_QUANTITY, paymentLinkFor } from './payment-links.js';
 import { adminOwnerEmail, normalizeAllowedAdminEmails, validateAdminEmails } from './admin-access.js';
+import { createTicketPdf, ticketUrl } from './ticket-pdf.js';
 
 type Bindings = {
   DB: D1Database;
@@ -296,6 +297,11 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
   const paymentUrl = frontendUrl(env, `payment/${reservation.order_number}/${reservation.access_token}`);
   const amountEuros = (reservation.amount_cents / 100).toFixed(2);
   const isPaid = reservation.status === 'PAID';
+  const tickets = isPaid ? await ticketsForOrder(env.DB, reservation.order_number) : [];
+  const attachment = isPaid ? {
+    filename: `tickets-${reservation.order_number}.pdf`,
+    content: Buffer.from(await createTicketPdf(reservation.order_number, paymentUrl, tickets)).toString('base64'),
+  } : null;
   const subject = isPaid
     ? `Je tickets voor het dubbelconcert van Half Past Nine & Diva Power (${reservation.order_number})`
     : `Je reservering voor het dubbelconcert van Half Past Nine & Diva Power (${reservation.order_number})`;
@@ -305,12 +311,12 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
       <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.6;">Ordernummer: <strong style="color:#101010;">${escapeHtml(reservation.order_number)}</strong></p>
       <h2 style="margin:0 0 12px;color:#101010;font-size:20px;">Je tickets</h2>
       <ul style="margin:0 0 24px;padding-left:20px;color:#4b5563;font-size:14px;line-height:1.8;">
-        ${(await ticketsForOrder(env.DB, reservation.order_number)).map((ticket) => {
-          const ticketUrl = `${paymentUrl}#ticket-${encodeURIComponent(ticket.ticket_code)}`;
-          return `<li><strong style="color:#101010;">${escapeHtml(ticket.ticket_code)}</strong> — <a href="${escapeHtml(ticketUrl)}" style="color:#087b76;">Bekijk dit ticket</a></li>`;
+        ${tickets.map((ticket) => {
+          return `<li><strong style="color:#101010;">${escapeHtml(ticket.ticket_code)}</strong> — <a href="${escapeHtml(ticketUrl(paymentUrl, ticket.ticket_code))}" style="color:#087b76;">Bekijk dit ticket</a></li>`;
         }).join('')}
       </ul>
       <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.6;">Je kunt je reservering en alle tickets altijd bekijken via je persoonlijke reserveringspagina.</p>
+      <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.6;">In de bijlage vind je je tickets als PDF, met een QR-code per ticket. Neem deze digitaal of geprint mee naar het concert.</p>
     `
     : `
       <p style="margin:0 0 24px;color:#4b5563;font-size:16px;line-height:1.6;">Je reservering voor ${reservation.quantity} ticket(s) is aangemaakt.</p>
@@ -369,6 +375,7 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
         To: [{ Email: reservation.email, Name: reservation.name }],
         Subject: subject,
         HTML: html,
+        ...(attachment ? { Attachments: [{ Filename: attachment.filename, ContentType: 'application/pdf', Content: attachment.content }] } : {}),
       }),
     });
     if (!response.ok) throw new Error(`Mailpit rejected the email (${response.status})`);
@@ -395,14 +402,28 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
       throw new Error(tokenPayload.error_description || `Gmail token request failed (${tokenResponse.status})`);
     }
 
+    const boundary = `hpn-${crypto.randomUUID()}`;
     const mime = [
       'MIME-Version: 1.0',
       `From: Dorien Lorijn namens Half Past Nine <${sanitizeHeader(env.GOOGLE_SENDER_EMAIL)}>`,
       `To: ${sanitizeHeader(reservation.email)}`,
       `Subject: ${sanitizeHeader(subject)}`,
-      'Content-Type: text/html; charset=UTF-8',
-      '',
-      html,
+      ...(attachment ? [
+        `Content-Type: multipart/mixed; boundary="${boundary}"`,
+        '',
+        `--${boundary}`,
+        'Content-Type: text/html; charset=UTF-8',
+        'Content-Transfer-Encoding: base64',
+        '',
+        Buffer.from(html).toString('base64').match(/.{1,76}/g)!.join('\r\n'),
+        `--${boundary}`,
+        'Content-Type: application/pdf',
+        `Content-Disposition: attachment; filename="${attachment.filename}"`,
+        'Content-Transfer-Encoding: base64',
+        '',
+        attachment.content.match(/.{1,76}/g)!.join('\r\n'),
+        `--${boundary}--`,
+      ] : ['Content-Type: text/html; charset=UTF-8', '', html]),
     ].join('\r\n');
 
     const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
@@ -422,6 +443,7 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
       to: [reservation.email],
       subject,
       html,
+      ...(attachment ? { attachments: [attachment] } : {}),
     }),
   });
   if (!response.ok) throw new Error(`Resend rejected the email (${response.status})`);

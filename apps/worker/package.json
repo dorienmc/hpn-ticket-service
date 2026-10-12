@@ -19,11 +19,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "hono": "^4.13.8"
+    "hono": "^4.13.8",
+    "pdf-lib": "^1.17.1",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260922.1",
     "@types/node": "^22.10.2",
+    "@types/qrcode": "^1.5.5",
+    "jsqr": "^1.4.0",
     "typescript": "^5.6.3",
     "vitest": "^2.1.8",
     "wrangler": "^4.136.2"

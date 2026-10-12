@@ -33,7 +33,7 @@ const mailSink = createServer(async (request, response) => {
     } else if (request.url?.startsWith('/api/v1/search')) {
       const query = new URL(request.url, 'http://localhost').searchParams.get('query') ?? '';
       const matches = messages.filter((message) => message.To.some((recipient) => recipient.Email.includes(query.replace(/^to:/, ''))));
-      response.end(JSON.stringify({ messages_count: matches.length }));
+      response.end(JSON.stringify({ messages_count: matches.length, messages: matches }));
     } else {
       response.statusCode = 404;
       response.end(JSON.stringify({ error: 'Not found' }));
