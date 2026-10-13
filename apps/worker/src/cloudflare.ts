@@ -840,7 +840,9 @@ app.delete('/api/admin/orders/:orderNumber', async (context) => {
   }
 
   const [, result] = await context.env.DB.batch([
-    context.env.DB.prepare('DELETE FROM tickets WHERE order_id = ?').bind(reservation.id),
+    context.env.DB.prepare(`DELETE FROM tickets WHERE order_id = ?
+      AND EXISTS (SELECT 1 FROM orders WHERE id = ? AND status IN ('CANCELLED', 'EXPIRED'))`)
+      .bind(reservation.id, reservation.id),
     context.env.DB.prepare("DELETE FROM orders WHERE order_number = ? AND status IN ('CANCELLED', 'EXPIRED')").bind(value),
   ]);
   if (!result.meta.changes) return context.json({ error: 'Only cancelled or expired orders can be removed' }, 400);

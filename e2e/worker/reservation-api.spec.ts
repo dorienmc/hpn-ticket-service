@@ -5,6 +5,34 @@ import { resolve } from 'node:path';
 const api = process.env.E2E_API_URL || 'http://localhost:8789';
 const origin = 'http://localhost:5180';
 
+async function readMail(request: APIRequestContext, email: string) {
+  const mailpitUrl = process.env.E2E_MAILPIT_URL!;
+  const searchResponse = await request.get(`${mailpitUrl}/api/v1/search?query=${encodeURIComponent(`to:${email}`)}`);
+  expect(searchResponse.ok()).toBeTruthy();
+  const { messages } = await searchResponse.json();
+  return Promise.all(messages.map(async (summary: { ID: string }) => {
+    const messageResponse = await request.get(`${mailpitUrl}/api/v1/message/${encodeURIComponent(summary.ID)}`);
+    expect(messageResponse.ok()).toBeTruthy();
+    const message = await messageResponse.json();
+    const attachments = await Promise.all((message.Attachments ?? []).map(async (attachment: {
+      PartID: string;
+      FileName: string;
+      ContentType: string;
+    }) => {
+      const partResponse = await request.get(
+        `${mailpitUrl}/api/v1/message/${encodeURIComponent(summary.ID)}/part/${encodeURIComponent(attachment.PartID)}`,
+      );
+      expect(partResponse.ok()).toBeTruthy();
+      return {
+        Filename: attachment.FileName,
+        ContentType: attachment.ContentType,
+        Content: Buffer.from(await partResponse.body()).toString('base64'),
+      };
+    }));
+    return { ...message, Attachments: attachments };
+  }));
+}
+
 function executeSql(sql: string) {
   if (!process.env.E2E_STATE_DIR) throw new Error('Isolated D1 test state is not configured');
   const output = execFileSync(process.execPath, [
@@ -49,25 +77,19 @@ test('creates valid reservations with secure identifiers, correct quantity and a
 
 test('reservation emails omit PDFs while payment and resend emails attach PDFs for the same tickets', async ({ request }) => {
   const order = await reserve(request, 2);
-  const mailUrl = `${process.env.E2E_MAILPIT_URL}/api/v1/search?query=${encodeURIComponent(`to:${order.detail.email}`)}`;
-  const readMail = async () => {
-    const response = await request.get(mailUrl);
-    expect(response.ok()).toBeTruthy();
-    return (await response.json()).messages;
-  };
-  const reservationMail = await readMail();
+  const reservationMail = await readMail(request, order.detail.email);
   expect(reservationMail).toHaveLength(1);
-  expect(reservationMail[0].Attachments).toBeUndefined();
+  expect(reservationMail[0].Attachments).toHaveLength(0);
   await login(request);
   expect((await mutate(request, order.orderNumber, 'pay')).ok()).toBeTruthy();
-  const paidMail = await readMail();
+  const paidMail = await readMail(request, order.detail.email);
   expect(paidMail).toHaveLength(2);
   expect((await mutate(request, order.orderNumber, 'resend')).ok()).toBeTruthy();
-  const resentMail = await readMail();
+  const resentMail = await readMail(request, order.detail.email);
   expect(resentMail).toHaveLength(3);
   const details = await request.get(order.paymentUrl.replace(origin, api).replace('/hpn-ticket-service/payment/', '/api/reservations/'));
   const tickets = (await details.json()).tickets;
-  for (const mail of [paidMail[1], resentMail[2]]) {
+  for (const mail of [paidMail[0], resentMail[1]]) {
     expect(mail.Subject).toContain('Je tickets');
     expect(mail.Attachments).toHaveLength(1);
     expect(mail.Attachments[0].Filename).toBe(`tickets-${order.orderNumber}.pdf`);
@@ -219,7 +241,8 @@ for (const archivedStatus of ['CANCELLED', 'EXPIRED']) {
     expect(paid.tickets.every((ticket: { ticket_code: string }) =>
       !oldTickets.some((old: { ticket_code: string }) => old.ticket_code === ticket.ticket_code))).toBe(true);
     expect(await mailCount()).toBe(beforeMail + 1);
-    const mail = (await (await request.get(mailUrl)).json()).messages.at(-1);
+    const latestSummary = (await (await request.get(mailUrl)).json()).messages[0];
+    const mail = (await readMail(request, order.detail.email)).find((message) => message.ID === latestSummary.ID);
     expect(mail.Subject).toContain('Je tickets');
     expect(mail.Attachments).toHaveLength(1);
   });

@@ -99,17 +99,18 @@ test('customer can create a reservation and view its private status page', async
 });
 
 test('customer status page reflects paid status and ticket check-in state', async ({ page, request }) => {
+  const customerEmail = uniqueEmail();
   const response = await request.post(`${process.env.E2E_API_URL || 'http://localhost:8787'}/api/reservations`, {
     data: {
       name: 'Status Page E2E Customer',
-      email: uniqueEmail(),
+      email: customerEmail,
       quantity: 2,
     },
   });
 
   expect(response.ok()).toBeTruthy();
   const reservation = await response.json();
-  const mailSearchUrl = `${process.env.E2E_MAILPIT_URL || 'http://localhost:8025'}/api/v1/search?query=to:e2e-`;
+  const mailSearchUrl = `${process.env.E2E_MAILPIT_URL || 'http://localhost:8025'}/api/v1/search?query=${encodeURIComponent(`to:${customerEmail}`)}`;
   const countMailMessages = async () => (await (await page.request.get(mailSearchUrl)).json()).messages_count;
 
   await page.goto(reservation.paymentUrl);

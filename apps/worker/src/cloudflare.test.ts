@@ -25,6 +25,7 @@ const reservation: ReservationRecord = {
 function createReservationDb(
   reservationToFind = reservation,
   ticketCount = reservationToFind.status === 'PAID' ? reservationToFind.quantity : 0,
+  restoreBeforeBatch = false,
 ) {
   let storedReservation = reservationToFind;
   let orderDeleted = false;
@@ -44,15 +45,9 @@ function createReservationDb(
         }
         if (statement.includes('DELETE FROM tickets')) {
           if (statement.includes('EXISTS (SELECT 1 FROM orders')
-            && storedReservation.status === 'CANCELLED'
+            && (storedReservation.status === 'CANCELLED' || storedReservation.status === 'EXPIRED')
             && storedReservation.id === args[0]
             && storedReservation.id === args[1]) {
-            const changes = storedTicketCount;
-            storedTicketCount = 0;
-            return { meta: { changes } };
-          }
-          if (!statement.includes('EXISTS (SELECT 1 FROM orders')
-            && storedReservation.id === args[0]) {
             const changes = storedTicketCount;
             storedTicketCount = 0;
             return { meta: { changes } };
@@ -151,6 +146,9 @@ function createReservationDb(
 
   return {
     async batch(statements: { run(): Promise<unknown> }[]) {
+      if (restoreBeforeBatch) {
+        storedReservation = { ...storedReservation, status: 'PAID' };
+      }
       return Promise.all(statements.map((statement) => statement.run()));
     },
     prepare(statement: string) {
@@ -1095,6 +1093,30 @@ describe('Cloudflare Worker shell', () => {
     }, nonCancelledEnv);
     expect(rejected.status).toBe(400);
     await expect(rejected.json()).resolves.toEqual({ error: 'Only cancelled or expired orders can be removed' });
+  });
+
+  it('preserves tickets when an archived order is restored before deletion', async () => {
+    const bindings = {
+      FRONTEND_URL: 'http://localhost:5173/hpn-ticket-service/',
+      ADMIN_PASSWORD: 'local-test-password',
+      DB: createReservationDb({ ...reservation, status: 'CANCELLED' }, 2, true),
+    };
+    const login = await app.request('/api/auth/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: bindings.ADMIN_PASSWORD }),
+    }, bindings);
+    const cookie = login.headers.get('set-cookie')!.split(';')[0];
+    const response = await app.request('/api/admin/orders/HP9-1234-ABCD', {
+      method: 'DELETE',
+      headers: { Cookie: cookie, Origin: 'http://localhost:5173' },
+    }, bindings);
+
+    expect(response.status).toBe(400);
+    const details = await app.request('/api/reservations/HP9-1234-ABCD/token123', {}, bindings);
+    const order = await details.json() as { status: string; tickets: unknown[] };
+    expect(order.status).toBe('PAID');
+    expect(order.tickets).toHaveLength(2);
   });
 
   it('escapes untrusted reservation names in HTML email output', async () => {
