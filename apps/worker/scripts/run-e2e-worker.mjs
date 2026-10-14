@@ -28,15 +28,59 @@ const mailSink = createServer(async (request, response) => {
     if (request.method === 'POST' && request.url === '/api/v1/send') {
       let body = '';
       for await (const chunk of request) body += chunk;
-      messages.push(JSON.parse(body));
-      response.end(JSON.stringify({ ID: String(messages.length) }));
+      const id = String(messages.length + 1);
+      messages.push({ ...JSON.parse(body), ID: id });
+      response.end(JSON.stringify({ ID: id }));
     } else if (request.url?.startsWith('/api/v1/search')) {
       const query = new URL(request.url, 'http://localhost').searchParams.get('query') ?? '';
-      const matches = messages.filter((message) => message.To.some((recipient) => recipient.Email.includes(query.replace(/^to:/, ''))));
-      response.end(JSON.stringify({ messages_count: matches.length }));
+      const email = query.replace(/^to:/, '').toLowerCase();
+      const matches = messages.filter((message) => message.To.some((recipient) => recipient.Email.toLowerCase() === email));
+      response.end(JSON.stringify({
+        messages_count: matches.length,
+        messages: matches.toReversed().map((message) => ({
+          ID: message.ID,
+          To: message.To,
+          From: message.From,
+          Subject: message.Subject,
+          Attachments: message.Attachments?.length ?? 0,
+        })),
+      }));
     } else {
-      response.statusCode = 404;
-      response.end(JSON.stringify({ error: 'Not found' }));
+      const partMatch = request.url?.match(/^\/api\/v1\/message\/([^/]+)\/part\/([^/]+)$/);
+      if (request.method === 'GET' && partMatch) {
+        const message = messages.find((candidate) => candidate.ID === decodeURIComponent(partMatch[1]));
+        const attachment = message?.Attachments?.[Number(partMatch[2]) - 1];
+        if (!attachment) {
+          response.statusCode = 404;
+          response.end(JSON.stringify({ error: 'Not found' }));
+          return;
+        }
+        response.setHeader('Content-Type', attachment.ContentType);
+        response.end(Buffer.from(attachment.Content, 'base64'));
+        return;
+      }
+
+      const messageMatch = request.url?.match(/^\/api\/v1\/message\/([^/]+)$/);
+      if (request.method === 'GET' && messageMatch) {
+        const message = messages.find((candidate) => candidate.ID === decodeURIComponent(messageMatch[1]));
+        if (!message) {
+          response.statusCode = 404;
+          response.end(JSON.stringify({ error: 'Not found' }));
+          return;
+        }
+        response.end(JSON.stringify({
+          ...message,
+          Attachments: (message.Attachments ?? []).map((attachment, index) => ({
+            PartID: String(index + 1),
+            FileName: attachment.Filename,
+            ContentType: attachment.ContentType,
+            Size: Buffer.from(attachment.Content, 'base64').byteLength,
+          })),
+        }));
+      } else {
+        response.statusCode = 404;
+        response.end(JSON.stringify({ error: 'Not found' }));
+      }
     }
   } catch (error) {
     console.error(error);

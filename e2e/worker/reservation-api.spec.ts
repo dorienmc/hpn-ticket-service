@@ -5,6 +5,34 @@ import { resolve } from 'node:path';
 const api = process.env.E2E_API_URL || 'http://localhost:8789';
 const origin = 'http://localhost:5180';
 
+async function readMail(request: APIRequestContext, email: string) {
+  const mailpitUrl = process.env.E2E_MAILPIT_URL!;
+  const searchResponse = await request.get(`${mailpitUrl}/api/v1/search?query=${encodeURIComponent(`to:${email}`)}`);
+  expect(searchResponse.ok()).toBeTruthy();
+  const { messages } = await searchResponse.json();
+  return Promise.all(messages.map(async (summary: { ID: string }) => {
+    const messageResponse = await request.get(`${mailpitUrl}/api/v1/message/${encodeURIComponent(summary.ID)}`);
+    expect(messageResponse.ok()).toBeTruthy();
+    const message = await messageResponse.json();
+    const attachments = await Promise.all((message.Attachments ?? []).map(async (attachment: {
+      PartID: string;
+      FileName: string;
+      ContentType: string;
+    }) => {
+      const partResponse = await request.get(
+        `${mailpitUrl}/api/v1/message/${encodeURIComponent(summary.ID)}/part/${encodeURIComponent(attachment.PartID)}`,
+      );
+      expect(partResponse.ok()).toBeTruthy();
+      return {
+        Filename: attachment.FileName,
+        ContentType: attachment.ContentType,
+        Content: Buffer.from(await partResponse.body()).toString('base64'),
+      };
+    }));
+    return { ...message, Attachments: attachments };
+  }));
+}
+
 function executeSql(sql: string) {
   if (!process.env.E2E_STATE_DIR) throw new Error('Isolated D1 test state is not configured');
   const output = execFileSync(process.execPath, [
@@ -47,6 +75,32 @@ test('creates valid reservations with secure identifiers, correct quantity and a
   expect(order.detail.quantity).toBe(2);
 });
 
+test('reservation emails omit PDFs while payment and resend emails attach PDFs for the same tickets', async ({ request }) => {
+  const order = await reserve(request, 2);
+  const reservationMail = await readMail(request, order.detail.email);
+  expect(reservationMail).toHaveLength(1);
+  expect(reservationMail[0].Attachments).toHaveLength(0);
+  await login(request);
+  expect((await mutate(request, order.orderNumber, 'pay')).ok()).toBeTruthy();
+  const paidMail = await readMail(request, order.detail.email);
+  expect(paidMail).toHaveLength(2);
+  expect((await mutate(request, order.orderNumber, 'resend')).ok()).toBeTruthy();
+  const resentMail = await readMail(request, order.detail.email);
+  expect(resentMail).toHaveLength(3);
+  const details = await request.get(order.paymentUrl.replace(origin, api).replace('/hpn-ticket-service/payment/', '/api/reservations/'));
+  const tickets = (await details.json()).tickets;
+  for (const mail of [paidMail[0], resentMail[0]]) {
+    expect(mail.Subject).toContain('Je tickets');
+    expect(mail.Attachments).toHaveLength(1);
+    expect(mail.Attachments[0].Filename).toBe(`tickets-${order.orderNumber}.pdf`);
+    expect(mail.Attachments[0].ContentType).toBe('application/pdf');
+    expect(Buffer.from(mail.Attachments[0].Content, 'base64').subarray(0, 5).toString()).toBe('%PDF-');
+    for (const ticket of tickets) {
+      expect(mail.HTML).toContain(`${order.paymentUrl}#ticket-${encodeURIComponent(ticket.ticket_code)}`);
+    }
+  }
+});
+
 test('rejects invalid quantities and accepts the supported maximum (former quantity tests)', async ({ request }) => {
   for (const quantity of [0, 6, 2.5]) {
     const response = await request.post(`${api}/api/reservations`, {
@@ -66,14 +120,44 @@ test('calculates capacity from active reservations (former capacity test)', asyn
   expect(after.available).toBe(before.available - 9);
 });
 
-test('expires stale reservations and releases their capacity (former expiry test)', async ({ request }) => {
+test('old reservations remain reserved and retain capacity until manually cancelled', async ({ request, page }) => {
   const before = await (await request.get(`${api}/api/capacity`)).json();
   const order = await reserve(request, 3);
-  executeSql(`UPDATE orders SET expires_at = '2000-01-01T00:00:00.000Z' WHERE order_number = '${order.orderNumber}'`);
+  executeSql(`UPDATE orders SET created_at = '2000-01-01T00:00:00.000Z', expires_at = '2000-01-02T00:00:00.000Z' WHERE order_number = '${order.orderNumber}'`);
   const detailUrl = order.paymentUrl.replace(origin, api).replace('/hpn-ticket-service/payment/', '/api/reservations/');
   const detail = await (await request.get(detailUrl)).json();
-  expect(detail.status).toBe('EXPIRED');
+  expect(detail.status).toBe('RESERVED');
+  expect(detail).not.toHaveProperty('expiresAt');
+  expect(order).not.toHaveProperty('expiresAt');
+  expect((await (await request.get(`${api}/api/capacity`)).json()).available).toBe(before.available - 3);
+  await login(request);
+  const listed = await (await request.get(`${api}/api/admin/orders`)).json();
+  expect(listed.orders.find((entry: { order_number: string }) => entry.order_number === order.orderNumber).status).toBe('RESERVED');
+  await request.get(`${api}/api/admin/summary`);
+  await page.goto(order.paymentUrl);
+  await expect(page.getByText('Gereserveerd', { exact: true })).toBeVisible();
+  await expect(page.getByText('Verloopt op', { exact: true })).toHaveCount(0);
+  await page.goto(`${api}/api/auth/google`);
+  await expect(page.getByRole('row').filter({ hasText: order.orderNumber })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Verleng 24 uur' })).toHaveCount(0);
+  expect((await mutate(request, order.orderNumber, 'cancel')).ok()).toBeTruthy();
   expect((await (await request.get(`${api}/api/capacity`)).json()).available).toBe(before.available);
+});
+
+test('deletes an expired order from the admin archive', async ({ request, page }) => {
+  const order = await reserve(request, 1);
+  executeSql(`UPDATE orders SET status = 'EXPIRED' WHERE order_number = '${order.orderNumber}'`);
+
+  await page.goto(`${api}/api/auth/google?email=${encodeURIComponent('dorienmc@gmail.com')}`);
+  await expect(page).toHaveURL(/\/hpn-ticket-service\/admin$/);
+  await expect(page.getByRole('heading', { name: 'Overzicht reserveringen' })).toBeVisible();
+  await page.getByRole('link', { name: 'Verlopen / geannuleerd' }).click();
+
+  const orderRow = page.getByRole('row').filter({ hasText: order.orderNumber });
+  await expect(orderRow).toContainText('Verlopen');
+  page.once('dialog', (dialog) => dialog.accept());
+  await orderRow.getByRole('button', { name: 'Verwijder order' }).click();
+  await expect(orderRow).toHaveCount(0);
 });
 
 test('lists orders, pays idempotently, creates unique tickets and checks in once (former paid-order test)', async ({ request }) => {
@@ -111,14 +195,72 @@ test('cancels only reserved orders and releases capacity (former cancellation te
   expect((await mutate(request, order.orderNumber, 'cancel')).status()).toBe(400);
 });
 
-test('extends from current expiry and rejects missing orders (former extension test)', async ({ request }) => {
+test('reservation extension is no longer available', async ({ request }) => {
   const order = await reserve(request, 1);
   await login(request);
-  const extended = await mutate(request, order.orderNumber, 'extend', { hours: 24 });
-  const payload = await extended.json();
-  expect(payload.status).toBe('RESERVED');
-  expect(new Date(payload.expiresAt).getTime()).toBe(new Date(order.expiresAt).getTime() + 24 * 60 * 60 * 1000);
-  expect((await mutate(request, 'missing-order', 'extend', { hours: 24 })).status()).toBe(400);
+  expect((await mutate(request, order.orderNumber, 'extend', { hours: 24 })).status()).toBe(404);
+});
+
+for (const archivedStatus of ['CANCELLED', 'EXPIRED']) {
+  test(`restores ${archivedStatus} orders without reserved mail and with fresh paid tickets`, async ({ request, page }) => {
+    const order = await reserve(request, 2);
+    await login(request);
+    expect((await mutate(request, order.orderNumber, 'pay')).ok()).toBeTruthy();
+    const detailUrl = order.paymentUrl.replace(origin, api).replace('/hpn-ticket-service/payment/', '/api/reservations/');
+    const oldTickets = (await (await request.get(detailUrl)).json()).tickets;
+    expect((await mutate(request, order.orderNumber, 'cancel')).ok()).toBeTruthy();
+    if (archivedStatus === 'EXPIRED') {
+      executeSql(`UPDATE orders SET status = 'EXPIRED' WHERE order_number = '${order.orderNumber}'`);
+    }
+    const mailUrl = `${process.env.E2E_MAILPIT_URL}/api/v1/search?query=${encodeURIComponent(`to:${order.detail.email}`)}`;
+    const mailCount = async () => (await (await request.get(mailUrl)).json()).messages_count;
+    const beforeMail = await mailCount();
+    const beforeCapacity = (await (await request.get(`${api}/api/capacity`)).json()).available;
+    await page.goto(`${api}/api/auth/google`);
+    await page.getByRole('link', { name: 'Verlopen / geannuleerd' }).click();
+    const row = page.getByRole('row').filter({ hasText: order.orderNumber });
+    await row.getByRole('button', { name: 'Terug naar gereserveerd' }).click();
+    await expect(row).toHaveCount(0);
+    const reserved = await (await request.get(detailUrl)).json();
+    expect(reserved).toMatchObject({ status: 'RESERVED', paidAt: null, tickets: [] });
+    expect(await mailCount()).toBe(beforeMail);
+    expect((await (await request.get(`${api}/api/capacity`)).json()).available).toBe(beforeCapacity - 2);
+    expect((await mutate(request, order.orderNumber, 'restore', { status: 'PAID' })).status()).toBe(400);
+    expect((await mutate(request, order.orderNumber, 'cancel')).ok()).toBeTruthy();
+    if (archivedStatus === 'EXPIRED') {
+      executeSql(`UPDATE orders SET status = 'EXPIRED' WHERE order_number = '${order.orderNumber}'`);
+    }
+    await page.reload();
+    await expect(row).toBeVisible();
+    page.once('dialog', (dialog) => dialog.accept());
+    await row.getByRole('button', { name: 'Herstel als betaald' }).click();
+    await expect(row).toHaveCount(0);
+    const paid = await (await request.get(detailUrl)).json();
+    expect(paid.status).toBe('PAID');
+    expect(paid.tickets).toHaveLength(2);
+    expect(paid.tickets.every((ticket: { ticket_code: string }) =>
+      !oldTickets.some((old: { ticket_code: string }) => old.ticket_code === ticket.ticket_code))).toBe(true);
+    expect(await mailCount()).toBe(beforeMail + 1);
+    const latestSummary = (await (await request.get(mailUrl)).json()).messages[0];
+    const mail = (await readMail(request, order.detail.email)).find((message) => message.ID === latestSummary.ID);
+    expect(mail.Subject).toContain('Je tickets');
+    expect(mail.Attachments).toHaveLength(1);
+  });
+}
+
+test('restoring archived orders enforces capacity and blocks direct pay bypass', async ({ request }) => {
+  const order = await reserve(request, 1);
+  await login(request);
+  expect((await mutate(request, order.orderNumber, 'cancel')).ok()).toBeTruthy();
+  executeSql(`UPDATE orders SET quantity = 101 WHERE order_number = '${order.orderNumber}'`);
+  for (const status of ['RESERVED', 'PAID']) {
+    expect((await mutate(request, order.orderNumber, 'restore', { status })).status()).toBe(409);
+  }
+  expect((await mutate(request, order.orderNumber, 'pay')).status()).toBe(400);
+  expect((await mutate(request, order.orderNumber, 'restore', { status: 'INVALID' })).status()).toBe(400);
+  expect((await mutate(request, 'missing-order', 'restore', { status: 'RESERVED' })).status()).toBe(404);
+  const detailUrl = order.paymentUrl.replace(origin, api).replace('/hpn-ticket-service/payment/', '/api/reservations/');
+  expect(await (await request.get(detailUrl)).json()).toMatchObject({ status: 'CANCELLED', tickets: [] });
 });
 
 test('persists admin audit records and atomically rolls back on audit failure (former SQLite tests)', async ({ request }) => {

@@ -19,15 +19,50 @@ This project is configured for Node 24 via the repository's `.nvmrc` file and th
 
 ## TODOs
 
-- [ ] Send mail after payment is confirmed?
+- [x] Send mail after payment is confirmed
 - [x] Styling on ticket form and admin ui
 - [x] Use HP9 styling in emails
 - [x] Get things working in production
 - [x] CI/CD pipeline (GitHub Actions: worker tests/build, frontend build, e2e)
-- [ ] Ticket QR code support
-- [x] Ticket check-in support (manual check-in via admin UI)
+- [x] Ticket QR code support (PDF attachment in paid-ticket emails)
+- [x] Ticket check-in support (admin UI and private reservation page)
 - [x] Use the same Worker backend for local development, testing and production
 - [ ] Split up main.ts into several pages
+
+## Ticket PDFs and check-in
+
+Reservations do not expire automatically. They remain reserved and count toward
+capacity until an admin cancels them or marks them paid; paid orders also count
+toward capacity. There is no reservation expiry date or extension action.
+Previously expired orders remain in the archive and are not automatically
+restored. Admins can restore cancelled or expired orders to reserved or paid
+from the archive, provided sufficient capacity is available. Restoring to
+reserved sends no email and clears the payment timestamp; restoring to paid
+issues fresh tickets and sends the ticket email with PDF. Old ticket codes
+remain invalid. If mail delivery fails, the restored order stays paid and the
+admin can retry using the resend button. Admin login sessions still expire normally.
+
+The legacy `orders.expires_at` database column is retained for compatibility
+with existing databases, but is never used to determine status or capacity.
+New orders store an empty value in this column. No database migration is needed.
+
+Paid-ticket emails include one PDF with a page and QR code per ticket. The same
+PDF is regenerated from the existing ticket codes when an admin resends the
+ticket email. Reservation emails do not include a PDF. PDFs are generated in
+memory and are not stored separately.
+
+Payment confirmation issues the full ticket set with one conditional SQL insert
+in the same atomic D1 batch as the paid-state transition. Concurrent or repeated
+confirmations reuse the existing tickets and payment timestamp; only the request
+that transitions the order from reserved to paid sends the confirmation email.
+
+Each QR code opens the personal reservation page at the corresponding ticket,
+just like the ticket links in the email. The linked ticket is highlighted with
+a yellow background and a green outline. Opening the link does not check in a
+ticket. Keep the PDF private: anyone with the QR link can view the reservation.
+Only authenticated admins can check in individual tickets or use **Alles
+inchecken** on the reservation page. Bulk check-in skips used tickets and stops
+with a visible error if a request fails; successful check-ins remain saved.
 
 ## Local development with Docker Compose
 
@@ -36,6 +71,13 @@ From the project root, start all services:
 ```bash
 docker compose up --build
 ```
+
+The frontend and backend run `npm ci` at startup to keep their mounted
+`node_modules` volumes in sync with the lockfiles, including after adding
+dependencies. This adds installation time to startup but avoids stale packages
+after rebuilding. The `wrangler-data` volume is preserved; do not use
+`docker compose down -v` to fix dependency errors, as that also removes local D1
+data.
 
 This starts:
 
@@ -75,12 +117,18 @@ npm run test:e2e:worker
 
 The isolated suite runs all existing browser scenarios plus admin access and migrated reservation API tests against Wrangler and real local D1. It uses ports 8789 (API), 5180 (frontend) and 8030 (test mail capture), creates temporary D1 state, and cleans it up afterwards. It does not touch your normal local database or call Google. Install the root, Worker and frontend dependencies and Playwright Chromium before running it. CI also runs the Docker-based E2E suite with Mailpit.
 
+Ticket tests cover decoding the QR codes drawn in the PDF, one PDF page per
+ticket, attachments for Gmail/Mailpit/Resend, and no attachment for reservation
+emails. E2E tests verify payment and resend attachments, ticket-anchor navigation,
+admin-only bulk check-in, and retry after a partial check-in failure without
+checking in successful tickets twice.
+
 Coverage formerly attached to Express is now exercised against the Worker:
 
 | Former tests | Worker coverage |
 | --- | --- |
 | Reservation creation, identifiers, quantity limits, amount, capacity | `e2e/worker/reservation-api.spec.ts` and `src/cloudflare.test.ts` |
-| Expiry, cancellation, extension, missing-order handling | `e2e/worker/reservation-api.spec.ts` |
+| Non-expiring reservations, capacity retention, cancellation, legacy expired orders, missing-order handling | `e2e/worker/reservation-api.spec.ts` |
 | Order listing, idempotent payment, unique tickets, single check-in, summary quantities | `e2e/worker/reservation-api.spec.ts` |
 | Owner permissions, normalized persisted access, audit, rollback on audit failure | `src/cloudflare.test.ts`, `e2e/worker/admin-access.spec.ts`, `e2e/worker/reservation-api.spec.ts` |
 | Revocation, invalid input/JSON, non-owner/forged sessions, origin checks, disabled mocks, empty initial allowlist | `src/cloudflare.test.ts` and `e2e/worker/admin-access.spec.ts` |
@@ -94,7 +142,6 @@ Local backend defaults come from the `vars` block in `apps/worker/wrangler.local
 | `TOTAL_CAPACITY` | `100` | Maximum number of tickets |
 | `MAX_TICKETS_PER_RESERVATION` | `5` | Maximum tickets in one reservation |
 | `TICKET_PRICE_CENTS` | `1000` | Price per ticket in cents |
-| `RESERVATION_TTL_HOURS` | `336` | Reservation lifetime before expiry (two weeks) |
 | `ING_PAYMENT_LINK_1` | Demo URL | ING payment link for a 1-ticket reservation |
 | `ING_PAYMENT_LINK_2` | Demo URL | ING payment link for a 2-ticket reservation |
 | `ING_PAYMENT_LINK_3` | Demo URL | ING payment link for a 3-ticket reservation |
@@ -247,7 +294,6 @@ Click the link in the email or open the route manually. This page shows:
 - customer name and email
 - ticket quantity
 - amount due
-- expiry time
 - current status
 - ING payment link when the reservation is still active
 
@@ -275,10 +321,13 @@ From there you can:
 - see the current list of orders
 - verify status values such as RESERVED, PAID, EXPIRED, and CANCELLED
 - mark a reservation as paid with the action button for reserved orders
+- cancel reserved or paid orders (paid-order tickets are invalidated; this does not issue a refund), then permanently remove cancelled or expired orders from the archive
 
 ### 5. Re-check the private page after payment
 
-After marking an order paid from the admin page, refresh the reservation page or reopen the private link. The status should change to PAID.
+After marking an order paid from the admin page, refresh the reservation page or reopen the private link. The status should change to PAID. A payment confirmation email is sent with the concert date, time and venue, a link to the private reservation page, and a link for each ticket that opens that ticket on the reservation page. It also includes a PDF attachment with one QR code per ticket.
+
+When signed in as an admin, each valid ticket on the private reservation page has a **Ticket inchecken** button. It uses the same admin check-in endpoint as the admin overview. Customers who are not signed in as an admin only see ticket status.
 
 ## Useful commands
 

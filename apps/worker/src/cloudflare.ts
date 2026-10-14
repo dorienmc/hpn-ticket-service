@@ -5,6 +5,7 @@ import { createMiddleware } from 'hono/factory';
 import type { ReservationRecord, TicketRecord } from './types.js';
 import { MAX_SUPPORTED_TICKET_QUANTITY, paymentLinkFor } from './payment-links.js';
 import { adminOwnerEmail, normalizeAllowedAdminEmails, validateAdminEmails } from './admin-access.js';
+import { createTicketPdf, ticketUrl } from './ticket-pdf.js';
 
 type Bindings = {
   DB: D1Database;
@@ -31,7 +32,6 @@ type Bindings = {
   TOTAL_CAPACITY?: string;
   MAX_TICKETS_PER_RESERVATION?: string;
   TICKET_PRICE_CENTS?: string;
-  RESERVATION_TTL_HOURS?: string;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -222,9 +222,6 @@ function ticketCode(): string {
   return `HP9-TKT-${crypto.randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
 }
 
-function addHours(date: Date, hours: number): string {
-  return new Date(date.getTime() + hours * 60 * 60 * 1000).toISOString();
-}
 
 function sanitizeHeader(value: string): string {
   return value.replace(/[\r\n]+/g, ' ').trim();
@@ -248,17 +245,12 @@ function base64UrlEncode(value: string): string {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
-async function expireReservations(db: D1Database): Promise<void> {
-  await db.prepare(`UPDATE orders SET status = 'EXPIRED' WHERE status = 'RESERVED' AND expires_at <= ?`)
-    .bind(new Date().toISOString()).run();
-}
-
 async function availableCapacity(env: Bindings): Promise<number> {
   const result = await env.DB.prepare(`
     SELECT COALESCE(SUM(quantity), 0) AS active_quantity
     FROM orders
-    WHERE status = 'PAID' OR (status = 'RESERVED' AND expires_at > ?)
-  `).bind(new Date().toISOString()).first<{ active_quantity: number }>();
+    WHERE status IN ('PAID', 'RESERVED')
+  `).first<{ active_quantity: number }>();
   return numberFromEnv(env.TOTAL_CAPACITY, 100) - Number(result?.active_quantity ?? 0);
 }
 
@@ -295,7 +287,42 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
 
   const paymentUrl = frontendUrl(env, `payment/${reservation.order_number}/${reservation.access_token}`);
   const amountEuros = (reservation.amount_cents / 100).toFixed(2);
-  const subject = `Je reservering voor het dubbelconcert van Half Past Nine & Diva Power (${reservation.order_number})`;
+  const isPaid = reservation.status === 'PAID';
+  const tickets = isPaid ? await ticketsForOrder(env.DB, reservation.order_number) : [];
+  const attachment = isPaid ? {
+    filename: `tickets-${reservation.order_number}.pdf`,
+    content: Buffer.from(await createTicketPdf(reservation.order_number, paymentUrl, tickets)).toString('base64'),
+  } : null;
+  const subject = isPaid
+    ? `Je tickets voor het dubbelconcert van Half Past Nine & Diva Power (${reservation.order_number})`
+    : `Je reservering voor het dubbelconcert van Half Past Nine & Diva Power (${reservation.order_number})`;
+  const ticketSection = isPaid
+    ? `
+      <p style="margin:0 0 20px;color:#4b5563;font-size:16px;line-height:1.6;">Je betaling van €${amountEuros} is ontvangen. We zien je graag op zondag 8 november 2026 om 15:00 uur bij Twekkelerpoort – Lambertus, Buddestraat 1, 7521 SB Enschede.</p>
+      <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.6;">Ordernummer: <strong style="color:#101010;">${escapeHtml(reservation.order_number)}</strong></p>
+      <h2 style="margin:0 0 12px;color:#101010;font-size:20px;">Je tickets</h2>
+      <ul style="margin:0 0 24px;padding-left:20px;color:#4b5563;font-size:14px;line-height:1.8;">
+        ${tickets.map((ticket) => {
+          return `<li><strong style="color:#101010;">${escapeHtml(ticket.ticket_code)}</strong> — <a href="${escapeHtml(ticketUrl(paymentUrl, ticket.ticket_code))}" style="color:#087b76;">Bekijk dit ticket</a></li>`;
+        }).join('')}
+      </ul>
+      <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.6;">Je kunt je reservering en alle tickets altijd bekijken via je persoonlijke reserveringspagina.</p>
+      <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.6;">In de bijlage vind je je tickets als PDF, met een QR-code per ticket. Neem deze digitaal of geprint mee naar het concert.</p>
+    `
+    : `
+      <p style="margin:0 0 24px;color:#4b5563;font-size:16px;line-height:1.6;">Je reservering voor ${reservation.quantity} ticket(s) is aangemaakt.</p>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 22px;background-color:#f8f6ed;border:1px solid #e7e1cc;">
+        <tr>
+          <td style="padding:12px 14px;border-bottom:1px solid #e7e1cc;color:#4b5563;font-size:14px;">Ordernummer</td>
+          <td align="right" style="padding:12px 14px;border-bottom:1px solid #e7e1cc;color:#101010;font-size:14px;font-weight:bold;">${escapeHtml(reservation.order_number)}</td>
+        </tr>
+        <tr>
+          <td style="padding:12px 14px;color:#4b5563;font-size:14px;">Bedrag</td>
+          <td align="right" style="padding:12px 14px;color:#101010;font-size:14px;font-weight:bold;">€${amountEuros}</td>
+        </tr>
+      </table>
+      <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.6;">De penningmeester gaat nu handmatig checken of de betaling ontvangen is, dit kan enkele dagen duren. Na confirmatie ontvang je een mail met de tickets. De huidige status van de reservering kun je zien op je reserveringspagina. Nog niet betaald? Dan kan dit ook via die link.</p>
+    `;
   const html = `
     <div style="margin:0;padding:32px 12px;background-color:#f3f7f6;color:#172321;font-family:Arial,Helvetica,sans-serif;">
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
@@ -309,23 +336,12 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
               </tr>
               <tr>
                 <td style="padding:30px;">
-                  <h1 style="margin:0 0 12px;color:#101010;font-size:26px;line-height:1.25;">Bedankt, ${escapeHtml(reservation.name)}!</h1>
-                  <p style="margin:0 0 24px;color:#4b5563;font-size:16px;line-height:1.6;">Je reservering voor ${reservation.quantity} ticket(s) is aangemaakt.</p>
-                  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 22px;background-color:#f8f6ed;border:1px solid #e7e1cc;">
-                    <tr>
-                      <td style="padding:12px 14px;border-bottom:1px solid #e7e1cc;color:#4b5563;font-size:14px;">Ordernummer</td>
-                      <td align="right" style="padding:12px 14px;border-bottom:1px solid #e7e1cc;color:#101010;font-size:14px;font-weight:bold;">${reservation.order_number}</td>
-                    </tr>
-                    <tr>
-                      <td style="padding:12px 14px;color:#4b5563;font-size:14px;">Bedrag</td>
-                      <td align="right" style="padding:12px 14px;color:#101010;font-size:14px;font-weight:bold;">€${amountEuros}</td>
-                    </tr>
-                  </table>
-                  <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.6;">De penningmeester gaat nu handmatig checken of de betaling ontvangen is, dit kan enkele dagen duren. Na confirmatie ontvang je een mail met de tickets. De huidige status van de reservering kun je zien op je reserveringspagina. Nog niet betaald? Dan kan dit ook via die link.</p>
+                  <h1 style="margin:0 0 12px;color:#101010;font-size:26px;line-height:1.25;">${isPaid ? 'Je tickets zijn bevestigd' : `Bedankt, ${escapeHtml(reservation.name)}!`}</h1>
+                  ${ticketSection}
                   <table role="presentation" cellspacing="0" cellpadding="0" border="0">
                     <tr>
                       <td align="center" style="background-color:#f5c900;border:1px solid #101010;">
-                        <a href="${escapeHtml(paymentUrl)}" style="display:inline-block;padding:14px 20px;color:#101010;font-size:15px;font-weight:bold;text-decoration:none;">Open je reserveringspagina&nbsp; →</a>
+                        <a href="${escapeHtml(paymentUrl)}" style="display:inline-block;padding:14px 20px;color:#101010;font-size:15px;font-weight:bold;text-decoration:none;">${isPaid ? 'Bekijk je reservering' : 'Open je reserveringspagina'}&nbsp; →</a>
                       </td>
                     </tr>
                   </table>
@@ -350,6 +366,7 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
         To: [{ Email: reservation.email, Name: reservation.name }],
         Subject: subject,
         HTML: html,
+        ...(attachment ? { Attachments: [{ Filename: attachment.filename, ContentType: 'application/pdf', Content: attachment.content }] } : {}),
       }),
     });
     if (!response.ok) throw new Error(`Mailpit rejected the email (${response.status})`);
@@ -376,14 +393,28 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
       throw new Error(tokenPayload.error_description || `Gmail token request failed (${tokenResponse.status})`);
     }
 
+    const boundary = `hpn-${crypto.randomUUID()}`;
     const mime = [
       'MIME-Version: 1.0',
       `From: Dorien Lorijn namens Half Past Nine <${sanitizeHeader(env.GOOGLE_SENDER_EMAIL)}>`,
       `To: ${sanitizeHeader(reservation.email)}`,
       `Subject: ${sanitizeHeader(subject)}`,
-      'Content-Type: text/html; charset=UTF-8',
-      '',
-      html,
+      ...(attachment ? [
+        `Content-Type: multipart/mixed; boundary="${boundary}"`,
+        '',
+        `--${boundary}`,
+        'Content-Type: text/html; charset=UTF-8',
+        'Content-Transfer-Encoding: base64',
+        '',
+        Buffer.from(html).toString('base64').match(/.{1,76}/g)!.join('\r\n'),
+        `--${boundary}`,
+        'Content-Type: application/pdf',
+        `Content-Disposition: attachment; filename="${attachment.filename}"`,
+        'Content-Transfer-Encoding: base64',
+        '',
+        attachment.content.match(/.{1,76}/g)!.join('\r\n'),
+        `--${boundary}--`,
+      ] : ['Content-Type: text/html; charset=UTF-8', '', html]),
     ].join('\r\n');
 
     const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
@@ -403,6 +434,7 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
       to: [reservation.email],
       subject,
       html,
+      ...(attachment ? { attachments: [attachment] } : {}),
     }),
   });
   if (!response.ok) throw new Error(`Resend rejected the email (${response.status})`);
@@ -410,7 +442,7 @@ async function sendReservationEmail(env: Bindings, reservation: ReservationRecor
 
 app.use('/api/*', async (context, next) => cors({
   origin: frontendOrigin(context.env),
-  allowMethods: ['GET', 'POST', 'OPTIONS'],
+  allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type'],
   credentials: true,
 })(context, next));
@@ -523,7 +555,6 @@ app.post('/api/auth/logout', async (context) => {
 });
 
 app.get('/api/capacity', async (context) => {
-  await expireReservations(context.env.DB);
   return context.json({
     totalCapacity: numberFromEnv(context.env.TOTAL_CAPACITY, 100),
     available: await availableCapacity(context.env),
@@ -549,7 +580,6 @@ app.post('/api/reservations', async (context) => {
       return context.json({ error: 'reCAPTCHA validation failed' }, 400);
     }
 
-    await expireReservations(context.env.DB);
     if (quantity > await availableCapacity(context.env)) {
       return context.json({ error: 'Not enough tickets available' }, 400);
     }
@@ -563,12 +593,12 @@ app.post('/api/reservations', async (context) => {
       quantity,
       amountCents: quantity * numberFromEnv(context.env.TICKET_PRICE_CENTS, 1000),
       createdAt: now.toISOString(),
-      expiresAt: addHours(now, numberFromEnv(context.env.RESERVATION_TTL_HOURS, 336)),
     };
+    // Existing databases require expires_at; its legacy value no longer controls reservations.
     const reservation = await context.env.DB.prepare(`
       INSERT INTO orders (order_number, access_token, name, email, quantity, amount_cents, status, created_at, expires_at, paid_at, notes)
-      VALUES (?, ?, ?, ?, ?, ?, 'RESERVED', ?, ?, NULL, NULL) RETURNING *
-    `).bind(values.orderNumber, values.token, values.name, values.email, values.quantity, values.amountCents, values.createdAt, values.expiresAt)
+      VALUES (?, ?, ?, ?, ?, ?, 'RESERVED', ?, '', NULL, NULL) RETURNING *
+    `).bind(values.orderNumber, values.token, values.name, values.email, values.quantity, values.amountCents, values.createdAt)
       .first<ReservationRecord>();
     if (!reservation) throw new Error('Reservation could not be stored');
 
@@ -580,7 +610,6 @@ app.post('/api/reservations', async (context) => {
     return context.json({
       orderNumber: reservation.order_number,
       status: reservation.status,
-      expiresAt: reservation.expires_at,
       paymentUrl: frontendUrl(context.env, `payment/${reservation.order_number}/${reservation.access_token}`),
       available: await availableCapacity(context.env),
     }, 201);
@@ -590,7 +619,6 @@ app.post('/api/reservations', async (context) => {
 });
 
 app.get('/api/reservations/:orderNumber/:token', async (context) => {
-  await expireReservations(context.env.DB);
   const reservation = await context.env.DB.prepare('SELECT * FROM orders WHERE order_number = ? AND access_token = ?')
     .bind(context.req.param('orderNumber'), context.req.param('token')).first<ReservationRecord>();
   if (!reservation) return context.json({ error: 'Reservation not found' }, 404);
@@ -612,7 +640,7 @@ app.get('/api/reservations/:orderNumber/:token', async (context) => {
     amountCents: reservation.amount_cents,
     status: reservation.status,
     createdAt: reservation.created_at,
-    expiresAt: reservation.expires_at,
+    paidAt: reservation.paid_at,
     expired: reservation.status === 'EXPIRED',
     paymentLink: paymentLink ?? null,
     tickets: reservation.status === 'PAID' ? await ticketsForOrder(context.env.DB, reservation.order_number) : [],
@@ -620,7 +648,6 @@ app.get('/api/reservations/:orderNumber/:token', async (context) => {
 });
 
 app.get('/api/admin/summary', async (context) => {
-  await expireReservations(context.env.DB);
   const rows = await context.env.DB.prepare('SELECT status, COALESCE(SUM(quantity), 0) AS quantity FROM orders GROUP BY status')
     .all<{ status: string; quantity: number }>();
   const summary: Record<string, number> = {
@@ -688,7 +715,6 @@ app.post('/api/admin/access', async (context) => {
 });
 
 app.get('/api/admin/orders', async (context) => {
-  await expireReservations(context.env.DB);
   const result = await context.env.DB.prepare('SELECT * FROM orders ORDER BY created_at DESC').all<ReservationRecord>();
   const orders = await Promise.all(result.results.map(async (order: ReservationRecord) => ({
     ...order,
@@ -703,41 +729,124 @@ app.post('/api/admin/orders/:orderNumber/pay', async (context) => {
   const reservation = await context.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?')
     .bind(value).first<ReservationRecord>();
   if (!reservation) return context.json({ error: 'Order not found' }, 404);
+  if (reservation.status !== 'RESERVED' && reservation.status !== 'PAID') {
+    return context.json({ error: 'Archived orders must be restored before marking them paid' }, 400);
+  }
 
   const now = new Date().toISOString();
-  const statements: D1PreparedStatement[] = [
-    context.env.DB.prepare("UPDATE orders SET status = 'PAID', paid_at = ? WHERE order_number = ?").bind(now, value),
-  ];
-  const existing = await context.env.DB.prepare('SELECT COUNT(*) AS count FROM tickets WHERE order_id = ?')
-    .bind(reservation.id).first<{ count: number }>();
-  if (Number(existing?.count ?? 0) === 0) {
-    for (let index = 0; index < reservation.quantity; index += 1) {
-      statements.push(context.env.DB.prepare(`INSERT INTO tickets (order_id, ticket_code, status, created_at, used_at) VALUES (?, ?, 'VALID', ?, NULL)`)
-        .bind(reservation.id, ticketCode(), now));
+  const codes = Array.from({ length: reservation.quantity }, () => ticketCode());
+  // One conditional insert issues the entire set; concurrent batches cannot both see an empty set.
+  const [, transition] = await context.env.DB.batch([
+    context.env.DB.prepare(`INSERT INTO tickets (order_id, ticket_code, status, created_at, used_at)
+      SELECT orders.id, codes.ticket_code, 'VALID', ?, NULL
+      FROM orders CROSS JOIN (${codes.map(() => 'SELECT ? AS ticket_code').join(' UNION ALL ')}) AS codes
+      WHERE orders.order_number = ? AND orders.status IN ('RESERVED', 'PAID')
+        AND NOT EXISTS (SELECT 1 FROM tickets WHERE tickets.order_id = orders.id)`)
+      .bind(now, ...codes, value),
+    context.env.DB.prepare("UPDATE orders SET status = 'PAID', paid_at = ? WHERE order_number = ? AND status = 'RESERVED'")
+      .bind(now, value),
+  ]);
+  const paidReservation = await context.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?')
+    .bind(value).first<ReservationRecord>();
+  if (paidReservation?.status !== 'PAID') {
+    return context.json({ error: 'Order could not be marked paid: its status changed' }, 409);
+  }
+  if (Number(transition.meta.changes) > 0) {
+    try {
+      await sendReservationEmail(context.env, paidReservation);
+    } catch (error) {
+      console.error('Payment confirmation email delivery failed', error);
     }
   }
-  await context.env.DB.batch(statements);
-  return context.json({ orderNumber: value, status: 'PAID', paidAt: now });
+  return context.json({ orderNumber: value, status: 'PAID', paidAt: paidReservation.paid_at });
+});
+
+app.post('/api/admin/orders/:orderNumber/restore', async (context) => {
+  const body = await context.req.json<{ status?: string }>();
+  if (body.status !== 'RESERVED' && body.status !== 'PAID') {
+    return context.json({ error: 'Restore status must be RESERVED or PAID' }, 400);
+  }
+  const value = context.req.param('orderNumber');
+  const reservation = await context.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?')
+    .bind(value).first<ReservationRecord>();
+  if (!reservation) return context.json({ error: 'Order not found' }, 404);
+  if (reservation.status !== 'CANCELLED' && reservation.status !== 'EXPIRED') {
+    return context.json({ error: 'Only cancelled or expired orders can be restored' }, 400);
+  }
+  const now = new Date().toISOString();
+  const paidAt = body.status === 'PAID' ? now : null;
+  const capacity = numberFromEnv(context.env.TOTAL_CAPACITY, 100);
+  // Each statement checks the same eligibility inside one atomic D1 batch.
+  const eligible = `status IN ('CANCELLED', 'EXPIRED')
+    AND quantity <= ? - (SELECT COALESCE(SUM(quantity), 0) FROM orders WHERE status IN ('RESERVED', 'PAID'))`;
+  const statements: D1PreparedStatement[] = [
+    context.env.DB.prepare(`DELETE FROM tickets WHERE order_id = ?
+      AND EXISTS (SELECT 1 FROM orders WHERE order_number = ? AND ${eligible})`)
+      .bind(reservation.id, value, capacity),
+  ];
+  if (body.status === 'PAID') {
+    for (let index = 0; index < reservation.quantity; index += 1) {
+      statements.push(context.env.DB.prepare(`INSERT INTO tickets (order_id, ticket_code, status, created_at, used_at)
+        SELECT id, ?, 'VALID', ?, NULL FROM orders WHERE order_number = ? AND ${eligible}`)
+        .bind(ticketCode(), now, value, capacity));
+    }
+  }
+  statements.push(context.env.DB.prepare(`UPDATE orders SET status = ?, paid_at = ?, expires_at = ''
+    WHERE order_number = ? AND ${eligible}`).bind(body.status, paidAt, value, capacity));
+  const results = await context.env.DB.batch(statements);
+  if (!Number(results[results.length - 1].meta.changes)) {
+    return context.json({ error: 'Order could not be restored: insufficient capacity or its status changed' }, 409);
+  }
+  if (body.status === 'PAID') {
+    try {
+      await sendReservationEmail(context.env, { ...reservation, status: 'PAID', paid_at: paidAt });
+    } catch (error) {
+      console.error('Restored order ticket email delivery failed', error);
+      return context.json({ error: 'Order restored as paid, but ticket email delivery failed. Use resend to retry.' }, 502);
+    }
+  }
+  return context.json({ orderNumber: value, status: body.status, paidAt });
 });
 
 app.post('/api/admin/orders/:orderNumber/cancel', async (context) => {
   const value = context.req.param('orderNumber');
-  const result = await context.env.DB.prepare("UPDATE orders SET status = 'CANCELLED' WHERE order_number = ? AND status = 'RESERVED'")
-    .bind(value).run();
-  if (!result.meta.changes) return context.json({ error: 'Only active reserved orders can be cancelled' }, 400);
+  const reservation = await context.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?')
+    .bind(value).first<ReservationRecord>();
+  if (!reservation) return context.json({ error: 'Order not found' }, 404);
+  if (reservation.status !== 'RESERVED' && reservation.status !== 'PAID') {
+    return context.json({ error: 'Only reserved or paid orders can be cancelled' }, 400);
+  }
+
+  const [result] = await context.env.DB.batch([
+    context.env.DB.prepare("UPDATE orders SET status = 'CANCELLED' WHERE order_number = ? AND status IN ('RESERVED', 'PAID')")
+      .bind(value),
+    context.env.DB.prepare(`
+      DELETE FROM tickets
+      WHERE order_id = ?
+        AND EXISTS (SELECT 1 FROM orders WHERE id = ? AND status = 'CANCELLED')
+    `).bind(reservation.id, reservation.id),
+  ]);
+  if (!result.meta.changes) return context.json({ error: 'Only reserved or paid orders can be cancelled' }, 400);
   return context.json({ orderNumber: value, status: 'CANCELLED' });
 });
 
-app.post('/api/admin/orders/:orderNumber/extend', async (context) => {
-  const { hours = 24 } = await context.req.json<{ hours?: number }>();
-  const reservation = await context.env.DB.prepare("SELECT * FROM orders WHERE order_number = ? AND status = 'RESERVED'")
-    .bind(context.req.param('orderNumber')).first<ReservationRecord>();
-  if (!reservation || !Number.isInteger(hours) || hours < 1 || new Date(reservation.expires_at) <= new Date()) {
-    return context.json({ error: 'Only active reserved orders can be extended with a positive whole number of hours' }, 400);
+app.delete('/api/admin/orders/:orderNumber', async (context) => {
+  const value = context.req.param('orderNumber');
+  const reservation = await context.env.DB.prepare('SELECT * FROM orders WHERE order_number = ?')
+    .bind(value).first<ReservationRecord>();
+  if (!reservation) return context.json({ error: 'Order not found' }, 404);
+  if (reservation.status !== 'CANCELLED' && reservation.status !== 'EXPIRED') {
+    return context.json({ error: 'Only cancelled or expired orders can be removed' }, 400);
   }
-  const expiresAt = addHours(new Date(reservation.expires_at), hours);
-  await context.env.DB.prepare('UPDATE orders SET expires_at = ? WHERE id = ?').bind(expiresAt, reservation.id).run();
-  return context.json({ orderNumber: reservation.order_number, status: reservation.status, expiresAt });
+
+  const [, result] = await context.env.DB.batch([
+    context.env.DB.prepare(`DELETE FROM tickets WHERE order_id = ?
+      AND EXISTS (SELECT 1 FROM orders WHERE id = ? AND status IN ('CANCELLED', 'EXPIRED'))`)
+      .bind(reservation.id, reservation.id),
+    context.env.DB.prepare("DELETE FROM orders WHERE order_number = ? AND status IN ('CANCELLED', 'EXPIRED')").bind(value),
+  ]);
+  if (!result.meta.changes) return context.json({ error: 'Only cancelled or expired orders can be removed' }, 400);
+  return context.json({ orderNumber: value, deleted: true });
 });
 
 app.post('/api/admin/orders/:orderNumber/resend', async (context) => {

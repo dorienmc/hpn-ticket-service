@@ -89,6 +89,17 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
+async function checkInTicket(ticketCode: string): Promise<void> {
+  const response = await fetch(`${baseUrl}/api/admin/tickets/${encodeURIComponent(ticketCode)}/use`, {
+    method: 'POST',
+    credentials: 'include',
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error || 'Ticket kon niet worden ingecheckt.');
+  }
+}
+
 async function initApp() {
   if (isPrivacyPath) {
     document.title = 'Privacyverklaring – Ticket Service Half Past Nine';
@@ -338,7 +349,6 @@ async function initApp() {
                       ${order.status === 'RESERVED'
                         ? `<div class="admin-actions">
                             <button class="admin-button" data-action="pay" data-order="${order.order_number}"><span aria-hidden="true">✅</span> Markeer als betaald</button>
-                            <button class="admin-button secondary" data-action="extend" data-order="${order.order_number}"><span aria-hidden="true">⏱️</span> Verleng 24 uur</button>
                             <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}"><span aria-hidden="true">✉️</span> Opnieuw sturen</button>
                             <button class="admin-button danger" data-action="cancel" data-order="${order.order_number}"><span aria-hidden="true">✕</span> Annuleer</button>
                           </div>`
@@ -350,13 +360,20 @@ async function initApp() {
                                 <div class="ticket-progress">${usedCount}/${tickets.length} ingecheckt</div>
                                 <div class="admin-actions">
                                   <button class="admin-button" data-action="open-tickets" data-order="${order.order_number}"><span aria-hidden="true">🎫</span> Tickets inchecken</button>
-                                  <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}"><span aria-hidden="true">✉️</span> Opnieuw sturen</button>
+                                  <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}"><span aria-hidden="true">✉️</span> Ticketmail opnieuw verzenden</button>
+                                  <button class="admin-button danger" data-action="cancel" data-order="${order.order_number}"><span aria-hidden="true">✕</span> Annuleer</button>
                                 </div>
                               `;
                             })()
-                        : `<div class="admin-actions">
-                            <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}"><span aria-hidden="true">✉️</span> Opnieuw sturen</button>
-                          </div>`}
+                        : order.status === 'CANCELLED' || order.status === 'EXPIRED'
+                          ? `<div class="admin-actions">
+                              <button class="admin-button secondary" data-action="restore-reserved" data-order="${order.order_number}">Terug naar gereserveerd</button>
+                              <button class="admin-button" data-action="restore-paid" data-order="${order.order_number}">Herstel als betaald</button>
+                              <button class="admin-button danger" data-action="remove" data-order="${order.order_number}"><span aria-hidden="true">🗑️</span> Verwijder order</button>
+                            </div>`
+                          : `<div class="admin-actions">
+                              <button class="admin-button secondary" data-action="resend" data-order="${order.order_number}"><span aria-hidden="true">✉️</span> Opnieuw sturen</button>
+                            </div>`}
                     </td>
                   </tr>
                 `).join('')}
@@ -367,18 +384,6 @@ async function initApp() {
           const ticketModal = document.querySelector<HTMLDialogElement>('#ticket-modal');
           const ticketModalTitle = document.querySelector<HTMLHeadingElement>('#ticket-modal-title');
           const ticketModalBody = document.querySelector<HTMLDivElement>('#ticket-modal-body');
-
-          async function checkinTicket(ticketCode: string) {
-            const response = await fetch(`${baseUrl}/api/admin/tickets/${encodeURIComponent(ticketCode)}/use`, {
-              method: 'POST',
-              credentials: 'include',
-            });
-            const payload = await response.json();
-            if (!response.ok) {
-              throw new Error(payload.error || 'Ticket kon niet worden ingecheckt.');
-            }
-            return payload;
-          }
 
           function renderTicketModal(order: any) {
             if (!ticketModal || !ticketModalBody || !ticketModalTitle) return;
@@ -405,7 +410,7 @@ async function initApp() {
               const targets = tickets.filter((ticket: any) => ticket.status !== 'USED');
               for (const ticket of targets) {
                 try {
-                  await checkinTicket(ticket.ticket_code);
+                  await checkInTicket(ticket.ticket_code);
                   ticket.status = 'USED';
                 } catch (error) {
                   alert(error instanceof Error ? error.message : 'Ticket kon niet worden ingecheckt.');
@@ -420,7 +425,7 @@ async function initApp() {
                 if (!ticketCode) return;
                 button.disabled = true;
                 try {
-                  await checkinTicket(ticketCode);
+                  await checkInTicket(ticketCode);
                   const ticket = tickets.find((candidate: any) => candidate.ticket_code === ticketCode);
                   if (ticket) ticket.status = 'USED';
                   window.location.reload();
@@ -448,21 +453,30 @@ async function initApp() {
                 return;
               }
 
+              const order = orders.find((candidate: any) => candidate.order_number === orderNumber);
               const confirmation = action === 'cancel'
-                ? `Reservering ${orderNumber} annuleren? De tickets komen dan weer beschikbaar.`
-                : undefined;
+                ? `Order ${orderNumber} annuleren?${order?.status === 'PAID' ? ' Dit stort geen betaling terug; de ticketcodes worden ongeldig gemaakt en de capaciteit komt weer beschikbaar.' : ' De capaciteit komt weer beschikbaar.'}`
+                : action === 'remove'
+                      ? `${order?.status === 'EXPIRED' ? 'Verlopen' : 'Geannuleerde'} order ${orderNumber} definitief verwijderen? Dit kan niet ongedaan worden gemaakt.`
+                  : action === 'restore-paid'
+                    ? `Order ${orderNumber} herstellen als betaald? Er worden nieuwe tickets aangemaakt en een ticketmail verstuurd.`
+                  : undefined;
 
               if (confirmation && !window.confirm(confirmation)) {
                 return;
               }
 
               button.disabled = true;
-              const endpoint = `${baseUrl}/api/admin/orders/${encodeURIComponent(orderNumber)}/${action}`;
+              const orderEndpoint = `${baseUrl}/api/admin/orders/${encodeURIComponent(orderNumber)}`;
+              const restoring = action === 'restore-reserved' || action === 'restore-paid';
+              const endpoint = action === 'remove' ? orderEndpoint : `${orderEndpoint}/${restoring ? 'restore' : action}`;
               const response = await fetch(endpoint, {
-                method: 'POST',
+                method: action === 'remove' ? 'DELETE' : 'POST',
                 credentials: 'include',
-                headers: action === 'extend' ? { 'Content-Type': 'application/json' } : undefined,
-                body: action === 'extend' ? JSON.stringify({ hours: 24 }) : undefined,
+                ...(restoring ? {
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ status: action === 'restore-paid' ? 'PAID' : 'RESERVED' }),
+                } : {}),
               });
               const payload = await response.json();
               button.disabled = false;
@@ -519,11 +533,14 @@ async function initApp() {
           throw new Error(payload.error || 'Reservation not found');
         }
 
+        const sessionResponse = await fetch(`${baseUrl}/api/auth/session`, { credentials: 'include' });
+        if (!sessionResponse.ok) throw new Error('De beheerdersstatus kon niet worden gecontroleerd.');
+        const session = await sessionResponse.json();
+        const isAdmin = session.authenticated === true;
         const amount = (payload.amountCents / 100).toFixed(2);
-        const expiresAt = new Date(payload.expiresAt).toLocaleString('nl-NL', {
-          dateStyle: 'medium',
-          timeStyle: 'short',
-        });
+        const paidAt = payload.paidAt
+          ? new Date(payload.paidAt).toLocaleString('nl-NL', { dateStyle: 'medium', timeStyle: 'short' })
+          : null;
 
         const statusMarkup = payload.status === 'PAID'
           ? `<div class="badge success">Betaald</div>`
@@ -558,9 +575,18 @@ async function initApp() {
           ? `
             <div class="payment-box success-box">
               <h2>Je tickets</h2>
+              ${isAdmin ? `<button class="admin-button" data-checkin-all ${payload.tickets.every((ticket: { status: string }) => ticket.status === 'USED') ? 'disabled' : ''}><span aria-hidden="true">✅</span> Alles inchecken</button>` : ''}
               <ul class="ticket-list">
-                ${payload.tickets.map((ticket: { ticket_code: string; status: string }) => `<li><strong>${ticket.ticket_code}</strong><span>${statusLabel(ticket.status)}</span></li>`).join('')}
+                ${payload.tickets.map((ticket: { ticket_code: string; status: string }) => `
+                  <li id="ticket-${escapeHtml(ticket.ticket_code)}">
+                    <span><strong>${escapeHtml(ticket.ticket_code)}</strong> <span>${statusLabel(ticket.status)}</span></span>
+                    ${isAdmin && ticket.status !== 'USED'
+                      ? `<button class="admin-button secondary" data-checkin-ticket="${escapeHtml(ticket.ticket_code)}"><span aria-hidden="true">🎫</span> Ticket inchecken</button>`
+                      : ''}
+                  </li>
+                `).join('')}
               </ul>
+              ${isAdmin ? '<p id="ticket-checkin-status" class="status" aria-live="polite"></p>' : ''}
             </div>
           `
           : '';
@@ -575,11 +601,80 @@ async function initApp() {
               <div><dt>E-mail</dt><dd>${escapeHtml(payload.email)}</dd></div>
               <div><dt>Tickets</dt><dd>${payload.quantity}</dd></div>
               <div><dt>Bedrag</dt><dd>€${amount}</dd></div>
-              <div><dt>Verloopt op</dt><dd>${expiresAt}</dd></div>
+              ${paidAt ? `<div><dt>Betaald op</dt><dd>${escapeHtml(paidAt)}</dd></div>` : ''}
           </dl>
           ${paymentSection}
           ${ticketSection}
         `;
+
+        container.querySelectorAll<HTMLButtonElement>('[data-checkin-ticket]').forEach((button) => {
+          button.addEventListener('click', async () => {
+            const ticketCode = button.dataset.checkinTicket;
+            if (!ticketCode) return;
+            button.disabled = true;
+            const checkinStatus = container.querySelector<HTMLParagraphElement>('#ticket-checkin-status');
+            if (checkinStatus) checkinStatus.textContent = 'Ticket wordt ingecheckt...';
+            try {
+              await checkInTicket(ticketCode);
+              window.location.reload();
+            } catch (error) {
+              button.disabled = false;
+              if (checkinStatus) {
+                checkinStatus.textContent = error instanceof Error ? error.message : 'Ticket kon niet worden ingecheckt.';
+                checkinStatus.classList.add('error-message');
+              }
+            }
+          });
+        });
+
+        container.querySelector<HTMLButtonElement>('[data-checkin-all]')?.addEventListener('click', async () => {
+          const buttons = container.querySelectorAll<HTMLButtonElement>('[data-checkin-all], [data-checkin-ticket]');
+          buttons.forEach((button) => { button.disabled = true; });
+          const checkinStatus = container.querySelector<HTMLParagraphElement>('#ticket-checkin-status');
+          if (checkinStatus) {
+            checkinStatus.textContent = 'Tickets worden ingecheckt...';
+            checkinStatus.classList.remove('error-message');
+          }
+          try {
+            for (const ticket of payload.tickets) {
+              if (ticket.status === 'USED') continue;
+              await checkInTicket(ticket.ticket_code);
+              ticket.status = 'USED';
+              const item = container.querySelector(`#ticket-${CSS.escape(ticket.ticket_code)}`);
+              const status = item?.querySelector('span > span');
+              if (status) status.textContent = statusLabel('USED');
+              item?.querySelector('[data-checkin-ticket]')?.remove();
+            }
+            window.location.reload();
+          } catch (error) {
+            container.querySelectorAll<HTMLButtonElement>('[data-checkin-all], [data-checkin-ticket]')
+              .forEach((button) => { button.disabled = false; });
+            if (checkinStatus) {
+              checkinStatus.textContent = error instanceof Error ? error.message : 'Niet alle tickets konden worden ingecheckt.';
+              checkinStatus.classList.add('error-message');
+            }
+          }
+        });
+
+        function selectLinkedTicket() {
+          container?.querySelectorAll('.selected-ticket').forEach((ticket) => {
+            ticket.classList.remove('selected-ticket');
+            ticket.removeAttribute('aria-current');
+          });
+          if (!window.location.hash.startsWith('#ticket-')) return;
+          let ticketCode: string;
+          try {
+            ticketCode = decodeURIComponent(window.location.hash.slice('#ticket-'.length));
+          } catch {
+            return;
+          }
+          const ticket = container?.querySelector(`#ticket-${CSS.escape(ticketCode)}`);
+          ticket?.classList.add('selected-ticket');
+          ticket?.setAttribute('aria-current', 'true');
+          ticket?.scrollIntoView({ block: 'center' });
+        }
+        selectLinkedTicket();
+        window.addEventListener('hashchange', selectLinkedTicket);
       } catch (error) {
         container.innerHTML = `
           <p class="error-message">${error instanceof Error ? error.message : 'Deze reservering kon niet worden gevonden.'}</p>
