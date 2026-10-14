@@ -89,7 +89,7 @@ test('reservation emails omit PDFs while payment and resend emails attach PDFs f
   expect(resentMail).toHaveLength(3);
   const details = await request.get(order.paymentUrl.replace(origin, api).replace('/hpn-ticket-service/payment/', '/api/reservations/'));
   const tickets = (await details.json()).tickets;
-  for (const mail of [paidMail[0], resentMail[1]]) {
+  for (const mail of [paidMail[0], resentMail[0]]) {
     expect(mail.Subject).toContain('Je tickets');
     expect(mail.Attachments).toHaveLength(1);
     expect(mail.Attachments[0].Filename).toBe(`tickets-${order.orderNumber}.pdf`);
